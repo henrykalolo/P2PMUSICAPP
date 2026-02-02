@@ -46,7 +46,7 @@ export async function initIPFS(config: IPFSConfig = {}): Promise<Helia> {
 
   try {
     // Dynamic imports for libp2p modules
-    const [{ webRTC }, { webSockets }, { webTransport }, { noise }, { mplex }, { yamux }, { bootstrap }, { identify }, { kadDHT }] = await Promise.all([
+    const [{ webRTC }, { webSockets }, { webTransport }, { noise }, { mplex }, { yamux }, { bootstrap }, { identify }, { kadDHT }, { circuitRelayTransport }] = await Promise.all([
       import('@libp2p/webrtc'),
       import('@libp2p/websockets'),
       import('@libp2p/webtransport'),
@@ -56,6 +56,7 @@ export async function initIPFS(config: IPFSConfig = {}): Promise<Helia> {
       import('@libp2p/bootstrap'),
       import('@libp2p/identify'),
       import('@libp2p/kad-dht'),
+      import('@libp2p/circuit-relay-v2'),
     ]);
 
     const libp2pOptions: any = {
@@ -79,6 +80,7 @@ export async function initIPFS(config: IPFSConfig = {}): Promise<Helia> {
       services: {
         identify: identify(),
         dht: kadDHT(),
+        relay: circuitRelayTransport(),
       },
       ...config.libp2pConfig,
     };

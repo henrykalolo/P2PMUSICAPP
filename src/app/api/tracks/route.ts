@@ -12,7 +12,7 @@ export async function GET(request: NextRequest) {
     const genre = searchParams.get('genre');
 
     let sql = `
-      SELECT 
+      SELECT
         p.id,
         p.title,
         p.artist,
@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
         p.genre,
         p.year,
         p.duration_seconds as duration,
+        p.magnet_uri,
         p.ipfs_cid,
         p.ipfs_metadata_cid,
         p.ipfs_gateway_url,
@@ -28,8 +29,12 @@ export async function GET(request: NextRequest) {
         p.file_size,
         p.mime_type,
         p.created_at,
+        u.id as author_id,
         u.username as author_username,
-        u.avatar_url as author_avatar
+        u.avatar_url as author_avatar,
+        u.badge as author_badge,
+        (SELECT COUNT(*) FROM likes WHERE post_id = p.id) as likes_count,
+        (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comments_count
       FROM posts p
       JOIN users u ON p.author_id = u.id
       WHERE 1=1

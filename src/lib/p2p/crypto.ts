@@ -74,7 +74,7 @@ export async function decryptTrack(
   return await window.crypto.subtle.decrypt(
     {
       name: 'AES-GCM',
-      iv,
+      iv: iv as unknown as ArrayBuffer,
       tagLength: 128
     },
     key,
@@ -111,7 +111,7 @@ export async function deriveGroupKey(
     {
       name: 'HKDF',
       hash: 'SHA-256',
-      salt,
+      salt: salt as unknown as ArrayBuffer,
       info: new TextEncoder().encode('music-platform-v1')
     },
     hkdfKey,

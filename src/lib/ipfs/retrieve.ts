@@ -233,10 +233,10 @@ export async function isAvailableLocally(cid: string): Promise<boolean> {
 
   try {
     // Check if CID is pinned
-    for await (const pinnedCid of helia.pins.rm(parsedCid)) {
-      // Just checking if we can iterate, this won't actually remove
-      // because we're not consuming the async generator properly
-      return true;
+    for await (const pinnedCid of helia.pins.ls()) {
+      if (pinnedCid.toString() === cid) {
+        return true;
+      }
     }
     return false;
   } catch {

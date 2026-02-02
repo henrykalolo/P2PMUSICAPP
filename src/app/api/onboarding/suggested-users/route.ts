@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
       [userId]
     );
 
-    const preferenceValues = preferencesResult.rows.map((row) => row.preference_value);
+    const preferenceValues = preferencesResult.rows.map((row: { preference_value: string }) => row.preference_value);
 
     // Find users with overlapping preferences, excluding already followed
     let suggestions;

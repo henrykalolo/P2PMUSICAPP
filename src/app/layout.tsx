@@ -1,9 +1,7 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
+import "@/styles/accessibility.css";
 import { ServiceWorkerProvider } from "@/components/providers/ServiceWorkerProvider";
-
-const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "P2P Music Platform",
@@ -29,7 +27,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={inter.className}>
+      <body className="font-sans">
         <ServiceWorkerProvider>
           {children}
         </ServiceWorkerProvider>

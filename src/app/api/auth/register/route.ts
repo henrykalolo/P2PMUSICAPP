@@ -10,9 +10,77 @@ const challenges = new Map<string, string>();
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { username, email, action, response } = body;
+    const { username, email, password, action, response } = body;
 
-    // Step 1: Generate registration options
+    // Handle traditional password-based registration (no action specified)
+    if (!action) {
+      // Check if username already exists
+      const existingUser = await query(
+        'SELECT id FROM users WHERE username = $1 OR email = $2',
+        [username, email]
+      );
+
+      if (existingUser.rows.length > 0) {
+        return NextResponse.json(
+          { error: 'Username or email already exists' },
+          { status: 400 }
+        );
+      }
+
+      const userId = uuidv4();
+
+      // Check if this is one of the first 11 users (founder users)
+      const userCountResult = await query('SELECT COUNT(*) FROM users');
+      const userCount = parseInt(userCountResult.rows[0].count);
+      const isFounderUser = userCount < 11;
+
+      // Hash the password
+      const bcrypt = await import('bcryptjs');
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      // Create user in database
+      const userResult = await query(
+        `INSERT INTO users (
+          id, username, email, password, is_artist, can_upload,
+          onboarding_completed, is_founder_user
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [
+          userId,
+          username,
+          email,
+          hashedPassword,
+          true, // is_artist
+          isFounderUser, // can_upload (founders can upload immediately)
+          isFounderUser, // onboarding_completed (founders skip onboarding)
+          isFounderUser,
+        ]
+      );
+
+      const user = userResult.rows[0];
+
+      // Generate JWT token
+      const token = await createToken({
+        userId: user.id,
+        username: user.username,
+        role: user.role,
+        onboardingCompleted: user.onboarding_completed,
+      });
+
+      return NextResponse.json({
+        success: true,
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          role: user.role,
+          onboardingCompleted: user.onboarding_completed,
+          isFounderUser: user.is_founder_user,
+        },
+        token,
+      });
+    }
+
+    // Step 1: Generate registration options (WebAuthn)
     if (action === 'init') {
       const userId = uuidv4();
       const options = await generateRegisterOptions(userId, username);
@@ -26,7 +94,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Step 2: Verify registration
+    // Step 2: Verify registration (WebAuthn)
     if (action === 'verify') {
       const { userId, credential } = response;
       const expectedChallenge = challenges.get(userId);

@@ -1,7 +1,7 @@
 # Decentralized P2P Music Platform: Technical Specification
 
-> **Version:** 2.0  
-> **Last Updated:** January 2026  
+> **Version:** 2.1  
+> **Last Updated:** February 2026  
 > **Status:** Technical Architecture Document
 
 ---
@@ -13,11 +13,14 @@
 3. [Core Architecture](#3-core-architecture)
 4. [Security & Encryption](#4-security--encryption)
 5. [Social-Storage Model](#5-social-storage-model)
-6. [Implementation Details](#6-implementation-details)
-7. [Deployment Architecture](#7-deployment-architecture)
-8. [Compliance & Privacy](#8-compliance--privacy)
-9. [Performance & Accessibility](#9-performance--accessibility)
-10. [Development Roadmap](#10-development-roadmap)
+6. [Social Features](#6-social-features)
+7. [Admin Dashboard](#7-admin-dashboard)
+8. [Implementation Details](#8-implementation-details)
+9. [Deployment Architecture](#9-deployment-architecture)
+10. [Compliance & Privacy](#10-compliance--privacy)
+11. [Performance & Accessibility](#11-performance--accessibility)
+12. [Implemented Features](#12-implemented-features)
+13. [Development Roadmap](#13-development-roadmap)
 
 ---
 
@@ -1555,4 +1558,129 @@ app.post('/api/v1/admin/system/config', requireSuperadmin, async (req, res) => {
 
 ---
 
-*This document is maintained by the development team. For questions or updates, please open an issue in the project repository.*
+## 12. Implemented Features
+
+This section documents the features that have been implemented to align with the technical specification.
+
+### 12.1 Mutual Relationship Gating
+
+The platform now supports mutual-only content sharing through the `is_mutual` column in the `follows` table.
+
+```sql
+-- Mutual relationship trigger
+CREATE OR REPLACE FUNCTION update_mutual_status()
+RETURNS TRIGGER AS $
+BEGIN
+  IF EXISTS (SELECT 1 FROM follows 
+             WHERE follower_id = NEW.following_id 
+             AND following_id = NEW.follower_id) 
+  THEN
+    UPDATE follows SET is_mutual = TRUE 
+    WHERE (follower_id = NEW.follower_id AND following_id = NEW.following_id)
+       OR (follower_id = NEW.following_id AND following_id = NEW.follower_id);
+  END IF;
+  RETURN NEW;
+END;
+$ LANGUAGE plpgsql;
+```
+
+### 12.2 Proof of Storage Challenge
+
+A new API endpoint has been added to verify that users are actually storing encrypted chunks.
+
+**Endpoint:** `/api/storage-challenge`
+
+| Method | Description |
+|--------|-------------|
+| POST | Verify storage challenge response |
+| GET | Get current challenge for a user |
+
+### 12.3 Swarm Health Visualization
+
+The admin dashboard now includes a SwarmHealthChart component for visualizing peer distribution:
+
+- **Guardians (High Trust):** UTS > 60
+- **Nodes (Mutuals):** UTS 21-60
+- **Listeners (Ephemeral):** UTS ≤ 20
+
+### 12.4 Docker Compose Deployment
+
+A complete Docker Compose configuration has been added for production deployment:
+
+```bash
+docker-compose up -d
+```
+
+This includes:
+- PostgreSQL database
+- Private Tracker service
+- Coturn TURN server
+- Next.js application
+- Redis cache
+
+### 12.5 Nginx Configuration
+
+Production-ready nginx configuration with:
+- SSL/TLS setup
+- WebSocket proxy for tracker
+- P2P connection timeouts
+- Security headers
+
+### 12.6 Coturn TURN Server
+
+Complete TURN server configuration for NAT traversal:
+- Long-term credentials
+- SSL/TLS support
+- Admin interface
+
+### 12.7 Trigger-Based Distribution
+
+The Service Worker now handles social actions:
+
+- `FOLLOW_ARTIST`: Pre-fetches artist's top tracks
+- `LIKE_GENRE`: Joins genre swarm
+- `LIKE_TRACK`: Persists track to IndexedDB
+- `UPDATE_PREFERENCES`: Clears old cache
+
+### 12.8 Enhanced Admin Statistics
+
+The admin stats API now includes:
+- Swarm health metrics
+- Trust score distribution
+- Peer distribution
+- Storage statistics
+
+---
+
+## 13. Development Roadmap
+
+### Completed (v2.1)
+
+- [x] Mutual relationship triggers
+- [x] Proof of Storage Challenge API
+- [x] Swarm Health Chart component
+- [x] Docker Compose deployment
+- [x] Nginx configuration
+- [x] Coturn TURN server setup
+- [x] Trigger-based distribution in Service Worker
+- [x] Enhanced admin statistics
+
+### In Progress
+
+- [ ] X25519 key exchange for mutual authentication
+- [ ] Geographic peer distribution visualization
+- [ ] Mobile deep linking for PWA
+- [ ] IPFS backup for artist metadata
+
+### Future (v3.0)
+
+- [ ] Governance voting system
+- [ ] Token-based incentives
+- [ ] Cross-platform mobile app
+- [ ] Advanced analytics dashboard
+- [ ] Artist monetization features
+
+---
+
+*Last Updated: February 2026*
+*Version: 2.1**This document is maintained by the development team. For questions or updates, please open an issue in the project repository.*

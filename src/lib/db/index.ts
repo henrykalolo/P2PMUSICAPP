@@ -1,3 +1,4 @@
+// @ts-ignore - pg types not available
 import { Pool, PoolClient, QueryResult } from 'pg';
 
 const pool = new Pool({

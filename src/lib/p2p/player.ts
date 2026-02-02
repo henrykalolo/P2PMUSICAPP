@@ -1,3 +1,4 @@
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 import WebTorrent from 'webtorrent';
 
 export interface TorrentInfo {
@@ -9,11 +10,14 @@ export interface TorrentInfo {
 }
 
 export class P2PAudioPlayer {
-  private client: WebTorrent.Instance;
-  private currentTorrent: WebTorrent.Torrent | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private client: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private currentTorrent: any | null = null;
 
   constructor() {
-    this.client = new WebTorrent({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this.client = new (WebTorrent as any)({
       tracker: {
         ws: true,
         rtcConfig: {
@@ -36,17 +40,20 @@ export class P2PAudioPlayer {
    */
   async stream(magnetURI: string): Promise<{
     element: HTMLAudioElement;
-    torrent: WebTorrent.Torrent;
-    file: WebTorrent.TorrentFile;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    torrent: any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    file: any;
   }> {
     return new Promise((resolve, reject) => {
       this.client.add(magnetURI, {
         sequential: true,
         strategy: 'rarest'
-      }, (torrent) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      }, (torrent: any) => {
         this.currentTorrent = torrent;
 
-        const audioFile = torrent.files.find(f =>
+        const audioFile = torrent.files.find((f: { name: string }) =>
           ['.mp3', '.ogg', '.m4a', '.flac'].some(ext =>
             f.name.toLowerCase().endsWith(ext)
           )
@@ -72,7 +79,7 @@ export class P2PAudioPlayer {
         });
       });
 
-      this.client.on('error', (err) => {
+      this.client.on('error', (err: Error) => {
         reject(err);
       });
     });

@@ -3,15 +3,7 @@ const nextConfig = {
   experimental: {
     turbo: {}
   },
-  // Service Worker configuration
-  async rewrites() {
-    return [
-      {
-        source: '/sw.js',
-        destination: '/_next/static/sw.js',
-      },
-    ];
-  },
+  // Webpack configuration for polyfills
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.resolve.fallback = {

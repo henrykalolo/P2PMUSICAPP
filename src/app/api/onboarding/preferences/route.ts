@@ -111,7 +111,7 @@ export async function GET(request: NextRequest) {
       [userId]
     );
 
-    const preferences = result.rows.map((row) => ({
+    const preferences = result.rows.map((row: { preference_type: string; preference_value: string }) => ({
       type: row.preference_type,
       value: row.preference_value,
     }));

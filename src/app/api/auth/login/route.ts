@@ -9,9 +9,58 @@ const challenges = new Map<string, string>();
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { username, action, response } = body;
+    const { username, email, password, action, response } = body;
 
-    // Step 1: Generate authentication options
+    // Handle traditional password-based login (no action specified)
+    if (!action) {
+      // Find user by username or email
+      const userResult = await query(
+        'SELECT id, username, email, password, role, onboarding_completed FROM users WHERE username = $1 OR email = $2',
+        [username, email]
+      );
+
+      if (userResult.rows.length === 0) {
+        return NextResponse.json(
+          { error: 'Invalid credentials' },
+          { status: 401 }
+        );
+      }
+
+      const user = userResult.rows[0];
+
+      // Verify password
+      const bcrypt = await import('bcryptjs');
+      const isValidPassword = await bcrypt.compare(password, user.password);
+
+      if (!isValidPassword) {
+        return NextResponse.json(
+          { error: 'Invalid credentials' },
+          { status: 401 }
+        );
+      }
+
+      // Generate JWT token
+      const token = await createToken({
+        userId: user.id,
+        username: user.username,
+        role: user.role,
+        onboardingCompleted: user.onboarding_completed,
+      });
+
+      return NextResponse.json({
+        success: true,
+        user: {
+          id: user.id,
+          username: user.username,
+          email: user.email,
+          role: user.role,
+          onboardingCompleted: user.onboarding_completed,
+        },
+        token,
+      });
+    }
+
+    // Step 1: Generate authentication options (WebAuthn)
     if (action === 'init') {
       // Find user by username
       const userResult = await query(
@@ -34,7 +83,7 @@ export async function POST(request: NextRequest) {
         [user.id]
       );
 
-      const allowCredentials = credentialsResult.rows.map((cred) => ({
+      const allowCredentials = credentialsResult.rows.map((cred: { credential_id: string }) => ({
         id: cred.credential_id,
         type: 'public-key' as const,
       }));
@@ -50,7 +99,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Step 2: Verify authentication
+    // Step 2: Verify authentication (WebAuthn)
     if (action === 'verify') {
       const { userId, credential } = response;
       const expectedChallenge = challenges.get(userId);

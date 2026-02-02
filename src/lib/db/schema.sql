@@ -7,6 +7,7 @@ CREATE TABLE users (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   username TEXT UNIQUE NOT NULL,
   email TEXT UNIQUE,
+  password TEXT,
   avatar_url TEXT,
   trust_score INT DEFAULT 0,
   badge TEXT DEFAULT 'Newbie',
@@ -64,9 +65,33 @@ INSERT INTO users (
 CREATE TABLE follows (
   follower_id UUID REFERENCES users(id),
   following_id UUID REFERENCES users(id),
+  is_mutual BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP DEFAULT NOW(),
   PRIMARY KEY (follower_id, following_id)
 );
+
+-- Index for Mutual Gating Performance
+CREATE INDEX idx_mutual_gating ON follows(follower_id, is_mutual) WHERE is_mutual = TRUE;
+
+-- Trigger to Auto-Update Mutual Status
+CREATE OR REPLACE FUNCTION update_mutual_status()
+RETURNS TRIGGER AS $
+BEGIN
+  IF EXISTS (SELECT 1 FROM follows 
+             WHERE follower_id = NEW.following_id 
+             AND following_id = NEW.follower_id) 
+  THEN
+    UPDATE follows SET is_mutual = TRUE 
+    WHERE (follower_id = NEW.follower_id AND following_id = NEW.following_id)
+       OR (follower_id = NEW.following_id AND following_id = NEW.follower_id);
+  END IF;
+  RETURN NEW;
+END;
+$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_mutual_check
+AFTER INSERT ON follows
+FOR EACH ROW EXUTE FUNCTION update_mutual_status();
 
 -- Music Posts (Torrents/IPFS)
 CREATE TABLE posts (

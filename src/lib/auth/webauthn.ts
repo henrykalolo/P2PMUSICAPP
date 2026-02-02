@@ -21,7 +21,8 @@ const origin = process.env.WEBAUTHN_ORIGIN || 'http://localhost:3000';
 export async function generateRegisterOptions(
   userId: string,
   username: string
-): Promise<GenerateRegistrationOptionsOpts['optionsJSON']> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<any> {
   const options = await generateRegistrationOptions({
     rpName,
     rpID,
@@ -60,7 +61,8 @@ export async function verifyRegister(
  */
 export async function generateAuthOptions(
   allowCredentials?: { id: string; type: 'public-key' }[]
-): Promise<GenerateAuthenticationOptionsOpts['optionsJSON']> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Promise<any> {
   const options = await generateAuthenticationOptions({
     rpID,
     allowCredentials,
@@ -79,17 +81,18 @@ export async function verifyAuth(
   credentialPublicKey: Uint8Array,
   credentialCounter: number
 ): Promise<VerifiedAuthenticationResponse> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const verification = await verifyAuthenticationResponse({
     response: response as Parameters<typeof verifyAuthenticationResponse>[0]['response'],
     expectedChallenge,
     expectedOrigin: origin,
     expectedRPID: rpID,
-    authenticator: {
-      credentialPublicKey,
-      credentialID: new Uint8Array(),
+    credential: {
+      id: new Uint8Array(),
+      publicKey: credentialPublicKey,
       counter: credentialCounter,
     },
-  });
+  } as any);
 
   return verification;
 }
