@@ -9,7 +9,7 @@ coverage/
 
 # Next.js
 .next/
-out/
+# out/ - DO NOT ignore for GitHub Pages deployment
 
 # Production
 build/

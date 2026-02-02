@@ -1,8 +1,14 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: 'export',
+  images: {
+    unoptimized: true,
+  },
   experimental: {
     turbo: {}
   },
+  // GitHub Pages configuration
+  basePath: '',
   // Webpack configuration for polyfills
   webpack: (config, { isServer }) => {
     if (!isServer) {
@@ -25,23 +31,6 @@ const nextConfig = {
       };
     }
     return config;
-  },
-  async headers() {
-    return [
-      {
-        source: '/:path*',
-        headers: [
-          {
-            key: 'Cross-Origin-Opener-Policy',
-            value: 'same-origin',
-          },
-          {
-            key: 'Cross-Origin-Embedder-Policy',
-            value: 'require-corp',
-          },
-        ],
-      },
-    ];
   },
 };
 
