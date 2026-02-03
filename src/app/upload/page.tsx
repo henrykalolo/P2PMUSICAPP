@@ -14,7 +14,7 @@ const UploadComponent = dynamic(
 );
 
 export default function UploadPage() {
-  const { isAuthenticated, isLoading, setUser, setAuthenticated, setLoading } = useAuthStore();
+  const { isAuthenticated, isLoading, setUser, setAuthenticated, setLoading, user } = useAuthStore();
   const [authChecked, setAuthChecked] = useState(false);
 
   useEffect(() => {
@@ -56,12 +56,13 @@ export default function UploadPage() {
     genre: string;
     year: number;
     duration: number;
-    ipfsCid: string;
-    metadataCid: string;
+    storageResult: any;
   }) => {
     console.log('Upload complete:', metadata);
-    // Optionally redirect to feed after successful upload
-    // window.location.href = '/feed';
+    // Redirect to user's profile page to show their posts
+    if (user?.id) {
+      window.location.href = `/user/${user.id}`;
+    }
   };
 
   // Show loading state

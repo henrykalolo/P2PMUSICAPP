@@ -13,10 +13,10 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Try to get existing instance or initialize
+     // Try to get existing instance or initialize
     let helia;
     try {
-      helia = getHelia();
+      helia = await getHelia();
     } catch {
       // Not initialized yet, that's ok
       return NextResponse.json({

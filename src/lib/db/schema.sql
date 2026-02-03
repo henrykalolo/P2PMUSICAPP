@@ -140,6 +140,14 @@ CREATE TABLE comments (
   created_at TIMESTAMP DEFAULT NOW()
 );
 
+CREATE TABLE reposts (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id),
+  post_id UUID REFERENCES posts(id),
+  caption TEXT,
+  created_at TIMESTAMP DEFAULT NOW()
+);
+
 -- Private Groups
 CREATE TABLE groups (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -207,3 +215,99 @@ CREATE TABLE user_stats (
 
 -- Create index for trust score calculations
 CREATE INDEX idx_user_stats_trust_score ON user_stats(upload_ratio, hash_verification_rate);
+
+-- ============================================
+-- GRANT PERMISSIONS FOR APPLICATION USER
+-- ============================================
+-- Grant SELECT on all tables to public role (for read operations)
+GRANT SELECT ON users TO PUBLIC;
+GRANT SELECT ON posts TO PUBLIC;
+GRANT SELECT ON likes TO PUBLIC;
+GRANT SELECT ON comments TO PUBLIC;
+GRANT SELECT ON reposts TO PUBLIC;
+GRANT SELECT ON follows TO PUBLIC;
+GRANT SELECT ON music_preferences TO PUBLIC;
+GRANT SELECT ON groups TO PUBLIC;
+GRANT SELECT ON group_members TO PUBLIC;
+GRANT SELECT ON group_posts TO PUBLIC;
+GRANT SELECT ON webauthn_credentials TO PUBLIC;
+GRANT SELECT ON user_stats TO PUBLIC;
+
+-- Grant INSERT/UPDATE/DELETE on interaction tables
+GRANT INSERT, UPDATE, DELETE ON likes TO PUBLIC;
+GRANT INSERT, UPDATE, DELETE ON comments TO PUBLIC;
+GRANT INSERT, UPDATE, DELETE ON reposts TO PUBLIC;
+GRANT INSERT, UPDATE, DELETE ON follows TO PUBLIC;
+GRANT INSERT, UPDATE, DELETE ON music_preferences TO PUBLIC;
+GRANT INSERT, UPDATE, DELETE ON groups TO PUBLIC;
+GRANT INSERT, UPDATE, DELETE ON group_members TO PUBLIC;
+GRANT INSERT, UPDATE, DELETE ON group_posts TO PUBLIC;
+
+-- Grant INSERT on posts for uploads
+GRANT INSERT ON posts TO PUBLIC;
+
+-- Grant UPDATE on users for profile updates
+GRANT UPDATE ON users TO PUBLIC;
+
+-- Grant USAGE on sequences
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA PUBLIC TO PUBLIC;
+
+-- ============================================
+-- SWARM TABLES
+-- ============================================
+CREATE TABLE IF NOT EXISTS swarms (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  content_id VARCHAR(255) NOT NULL,
+  content_type VARCHAR(50) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  member_count INTEGER DEFAULT 1,
+  total_size BIGINT DEFAULT 0,
+  status VARCHAR(20) DEFAULT 'active',
+  UNIQUE(content_id)
+);
+
+CREATE TABLE IF NOT EXISTS swarm_members (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  swarm_id UUID NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  user_id VARCHAR(255) NOT NULL,
+  role VARCHAR(20) NOT NULL DEFAULT 'leecher',
+  joined_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  last_active_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  bytes_uploaded BIGINT DEFAULT 0,
+  bytes_downloaded BIGINT DEFAULT 0,
+  reputation_score INTEGER DEFAULT 0,
+  is_online BOOLEAN DEFAULT FALSE,
+  UNIQUE(swarm_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS swarm_participation (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id VARCHAR(255) NOT NULL,
+  swarm_id UUID NOT NULL REFERENCES swarms(id) ON DELETE CASCADE,
+  role VARCHAR(20) NOT NULL DEFAULT 'leecher',
+  joined_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  last_ping_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  total_upload_bytes BIGINT DEFAULT 0,
+  total_download_bytes BIGINT DEFAULT 0,
+  availability_score FLOAT DEFAULT 0,
+  UNIQUE(user_id, swarm_id)
+);
+
+-- Indexes for swarm performance
+CREATE INDEX idx_swarms_content ON swarms(content_id);
+CREATE INDEX idx_swarms_content_type ON swarms(content_type);
+CREATE INDEX idx_swarm_members_swarm ON swarm_members(swarm_id);
+CREATE INDEX idx_swarm_members_user ON swarm_members(user_id);
+CREATE INDEX idx_swarm_participation_user ON swarm_participation(user_id);
+CREATE INDEX idx_swarm_participation_swarm ON swarm_participation(swarm_id);
+
+-- Grant permissions for swarm tables
+GRANT SELECT ON swarms TO PUBLIC;
+GRANT SELECT ON swarm_members TO PUBLIC;
+GRANT SELECT ON swarm_participation TO PUBLIC;
+GRANT INSERT, UPDATE, DELETE ON swarms TO PUBLIC;
+GRANT INSERT, UPDATE, DELETE ON swarm_members TO PUBLIC;
+GRANT INSERT, UPDATE, DELETE ON swarm_participation TO PUBLIC;
+

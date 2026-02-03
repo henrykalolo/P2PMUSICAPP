@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { NotificationProvider } from '@/context/NotificationContext';
 
 interface ServiceWorkerContextType {
   isSupported: boolean;
@@ -163,7 +164,9 @@ export const ServiceWorkerProvider: React.FC<ServiceWorkerProviderProps> = ({ ch
 
   return (
     <ServiceWorkerContext.Provider value={value}>
-      {children}
+      <NotificationProvider>
+        {children}
+      </NotificationProvider>
     </ServiceWorkerContext.Provider>
   );
 };

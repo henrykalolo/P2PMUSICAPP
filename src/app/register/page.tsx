@@ -1,13 +1,17 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Music, Loader2 } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Music, Loader2, Eye, EyeOff } from 'lucide-react';
 
 export default function RegisterPage() {
+  const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
   const [formData, setFormData] = useState({
     username: '',
     email: '',
@@ -21,6 +25,11 @@ export default function RegisterPage() {
 
     if (formData.password !== formData.confirmPassword) {
       setError('Passwords do not match');
+      return;
+    }
+
+    if (formData.password.length < 8) {
+      setError('Password must be at least 8 characters');
       return;
     }
 
@@ -44,7 +53,7 @@ export default function RegisterPage() {
 
       const data = await response.json();
       localStorage.setItem('token', data.token);
-      window.location.href = '/onboarding';
+      router.push('/onboarding');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Registration failed');
     } finally {
@@ -53,83 +62,107 @@ export default function RegisterPage() {
   };
 
   return (
-    <main className="min-h-screen bg-background flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
+    <main className="min-h-screen bg-gradient-to-br from-background via-secondary/20 to-primary/5 flex items-center justify-center p-4">
+      <div className="w-full max-w-md bg-card border border-border/50 rounded-2xl shadow-xl p-8 backdrop-blur-sm">
         {/* Logo */}
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2 font-bold text-2xl">
-            <Music className="h-8 w-8" />
+            <Music className="h-8 w-8 text-primary" />
             P2P Music
           </Link>
-          <p className="text-muted-foreground mt-2">Create your account</p>
+          <p className="text-muted-foreground mt-2 text-lg">Create your account</p>
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-6">
           {error && (
-            <div className="p-3 text-sm text-red-500 bg-red-50 rounded-lg">
+            <div className="p-4 text-sm text-red-500 bg-red-50/50 rounded-xl border border-red-500/20">
               {error}
             </div>
           )}
 
           <div>
-            <label htmlFor="username" className="block text-sm font-medium mb-1">
+            <label htmlFor="username" className="block text-sm font-medium mb-2 text-foreground">
               Username
             </label>
-            <input
+            <Input
               id="username"
               type="text"
+              placeholder="Choose a username"
               value={formData.username}
               onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-              className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+              className="w-full"
               required
+              minLength={3}
+              maxLength={30}
+              disabled={isLoading}
             />
           </div>
 
           <div>
-            <label htmlFor="email" className="block text-sm font-medium mb-1">
+            <label htmlFor="email" className="block text-sm font-medium mb-2 text-foreground">
               Email
             </label>
-            <input
+            <Input
               id="email"
               type="email"
+              placeholder="Enter your email"
               value={formData.email}
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+              className="w-full"
               required
+              disabled={isLoading}
             />
           </div>
 
           <div>
-            <label htmlFor="password" className="block text-sm font-medium mb-1">
+            <label htmlFor="password" className="block text-sm font-medium mb-2 text-foreground">
               Password
             </label>
-            <input
-              id="password"
-              type="password"
-              value={formData.password}
-              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-              className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
-              required
-              minLength={8}
-            />
+            <div className="relative">
+              <Input
+                id="password"
+                type={showPassword ? 'text' : 'password'}
+                placeholder="Create a password"
+                value={formData.password}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                className="w-full pr-10"
+                required
+                minLength={8}
+                disabled={isLoading}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(!showPassword)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">Must be at least 8 characters</p>
           </div>
 
           <div>
-            <label htmlFor="confirmPassword" className="block text-sm font-medium mb-1">
+            <label htmlFor="confirmPassword" className="block text-sm font-medium mb-2 text-foreground">
               Confirm Password
             </label>
-            <input
+            <Input
               id="confirmPassword"
               type="password"
+              placeholder="Confirm your password"
               value={formData.confirmPassword}
               onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-              className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+              className="w-full"
               required
+              disabled={isLoading}
             />
           </div>
 
-          <Button type="submit" className="w-full" disabled={isLoading}>
+          <Button 
+            type="submit" 
+            className="w-full py-4 bg-gradient-to-r from-primary to-accent hover:from-primary/90 hover:to-accent/90 transition-all duration-300 text-lg font-semibold" 
+            disabled={isLoading}
+          >
             {isLoading ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -141,15 +174,15 @@ export default function RegisterPage() {
           </Button>
         </form>
 
-        <p className="text-center text-sm text-muted-foreground mt-6">
+        <p className="text-center text-sm text-muted-foreground mt-8">
           Already have an account?{' '}
-          <Link href="/login" className="text-primary hover:underline">
+          <Link href="/login" className="text-primary hover:text-primary/80 hover:underline transition-colors">
             Sign in
           </Link>
         </p>
 
         <p className="text-center text-sm text-muted-foreground mt-4">
-          <Link href="/" className="hover:underline">
+          <Link href="/" className="hover:text-foreground hover:underline transition-colors">
             ← Back to home
           </Link>
         </p>

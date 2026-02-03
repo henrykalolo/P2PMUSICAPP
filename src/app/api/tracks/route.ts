@@ -5,6 +5,14 @@ import { verifyToken } from '@/lib/auth/jwt';
 // GET /api/tracks - Get all tracks
 export async function GET(request: NextRequest) {
   try {
+    // Check if DATABASE_URL is configured
+    if (!process.env.DATABASE_URL) {
+      return NextResponse.json(
+        { error: 'Database not configured' },
+        { status: 503 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
     const limit = parseInt(searchParams.get('limit') || '20');
     const offset = parseInt(searchParams.get('offset') || '0');
@@ -34,7 +42,8 @@ export async function GET(request: NextRequest) {
         u.avatar_url as author_avatar,
         u.badge as author_badge,
         (SELECT COUNT(*) FROM likes WHERE post_id = p.id) as likes_count,
-        (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comments_count
+        (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comments_count,
+        (SELECT COUNT(*) FROM reposts WHERE post_id = p.id) as reposts_count
       FROM posts p
       JOIN users u ON p.author_id = u.id
       WHERE 1=1
@@ -62,7 +71,33 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      tracks: result.rows,
+      tracks: result.rows.map((row: Record<string, any>) => ({
+        id: row.id,
+        title: row.title,
+        artist: row.artist,
+        album: row.album,
+        genre: row.genre,
+        year: row.year,
+        duration: row.duration,
+        magnetUri: row.magnet_uri,
+        ipfsCid: row.ipfs_cid,
+        ipfsMetadataCid: row.ipfs_metadata_cid,
+        ipfsGatewayUrl: row.ipfs_gateway_url,
+        storageType: row.storage_type,
+        coverArtUrl: row.cover_art_url,
+        fileSize: row.file_size,
+        mimeType: row.mime_type,
+        createdAt: row.created_at,
+        author: {
+          id: row.author_id,
+          username: row.author_username,
+          avatarUrl: row.author_avatar,
+          badge: row.author_badge,
+        },
+        likesCount: parseInt(row.likes_count),
+        commentsCount: parseInt(row.comments_count),
+        repostsCount: parseInt(row.reposts_count),
+      })),
       pagination: {
         limit,
         offset,
@@ -118,25 +153,28 @@ export async function POST(request: NextRequest) {
       duration,
       ipfsCid,
       metadataCid,
+      magnetUri,
+      storageSystem,
       fileSize,
       mimeType,
+      coverArtUrl,
     } = body;
 
-    // Validate required fields
-    if (!title || !ipfsCid) {
-      return NextResponse.json(
-        { error: 'Title and IPFS CID are required' },
-        { status: 400 }
-      );
-    }
+     // Validate required fields
+     if (!title) {
+       return NextResponse.json(
+         { error: 'Title is required' },
+         { status: 400 }
+       );
+     }
 
-    // Validate IPFS CID format (should be base58 or base32 encoded)
-    if (ipfsCid.length < 46 || ipfsCid.length > 128) {
-      return NextResponse.json(
-        { error: 'Invalid IPFS CID format' },
-        { status: 400 }
-      );
-    }
+     // Validate IPFS CID format if provided (should be base58 or base32 encoded)
+     if (ipfsCid && (ipfsCid.length < 46 || ipfsCid.length > 128)) {
+       return NextResponse.json(
+         { error: 'Invalid IPFS CID format' },
+         { status: 400 }
+       );
+     }
 
     // Check if user can upload
     const userResult = await query(
@@ -160,53 +198,71 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check for duplicate CID
-    const existingResult = await query(
-      'SELECT id FROM posts WHERE ipfs_cid = $1',
-      [ipfsCid]
-    );
+     // Check for duplicate CID if provided
+     if (ipfsCid) {
+       const existingResult = await query(
+         'SELECT id FROM posts WHERE ipfs_cid = $1',
+         [ipfsCid]
+       );
 
-    if (existingResult.rows.length > 0) {
-      return NextResponse.json(
-        { error: 'Track with this CID already exists' },
-        { status: 409 }
-      );
+       if (existingResult.rows.length > 0) {
+         return NextResponse.json(
+           { error: 'Track with this CID already exists' },
+           { status: 409 }
+         );
+       }
     }
 
-    // Insert track into database
-    const result = await query(
-      `INSERT INTO posts (
-        author_id,
-        title,
-        artist,
-        album,
-        genre,
-        year,
-        duration_seconds,
-        ipfs_cid,
-        ipfs_metadata_cid,
-        ipfs_gateway_url,
-        storage_type,
-        file_size,
-        mime_type
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-      RETURNING *`,
-      [
-        payload.userId,
-        title,
-        artist || 'Unknown Artist',
-        album || 'Unknown Album',
-        genre || '',
-        year || new Date().getFullYear(),
-        duration || 0,
-        ipfsCid,
-        metadataCid || null,
-        `https://ipfs.io/ipfs/${ipfsCid}`,
-        'ipfs',
-        fileSize || 0,
-        mimeType || 'audio/mpeg',
-      ]
-    );
+      // Determine storage type
+      let storageType = 'ipfs';
+      if (storageSystem) {
+        if (storageSystem.toLowerCase().includes('webtorrent') || magnetUri) {
+          storageType = 'torrent';
+        } else if (storageSystem.toLowerCase().includes('local')) {
+          storageType = 'local';
+        }
+      } else if (magnetUri) {
+        storageType = 'torrent';
+      }
+
+      // Insert track into database
+       const result = await query(
+        `INSERT INTO posts (
+          author_id,
+          title,
+          artist,
+          album,
+          genre,
+          year,
+          duration_seconds,
+          ipfs_cid,
+          ipfs_metadata_cid,
+          ipfs_gateway_url,
+          magnet_uri,
+          storage_type,
+          file_size,
+          mime_type,
+          cover_art_url
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        RETURNING *`,
+        [
+          payload.userId,
+          title,
+          artist || 'Unknown Artist',
+          album || 'Unknown Album',
+          genre || '',
+          year || new Date().getFullYear(),
+          duration || 0,
+          ipfsCid || null,
+          metadataCid || null,
+          ipfsCid ? `https://ipfs.io/ipfs/${ipfsCid}` : null,
+          magnetUri || null,
+          storageType,
+          fileSize || 0,
+          mimeType || 'audio/mpeg',
+          coverArtUrl || null,
+        ]
+      );
 
     // Update user's upload quota tracking (simplified - in production, track actual usage)
     await query(

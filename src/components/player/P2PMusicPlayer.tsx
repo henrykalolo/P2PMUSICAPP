@@ -1,18 +1,18 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { P2PAudioPlayer } from '@/lib/p2p/player';
+import { streamAudioFromIPFS, createIPFSAudioElement } from '@/lib/ipfs/retrieve';
 import { usePlayerStore } from '@/store/usePlayerStore';
 import { Button } from '@/components/ui/button';
-import { Play, Pause, SkipBack, SkipForward, Volume2, Users } from 'lucide-react';
+import { Play, Pause, SkipBack, SkipForward, Volume2, Users, Zap } from 'lucide-react';
 
 interface P2PMusicPlayerProps {
-  magnetURI: string;
+  ipfsCid?: string;
+  magnetURI?: string;
 }
 
-export const P2PMusicPlayer: React.FC<P2PMusicPlayerProps> = ({ magnetURI }) => {
+export const P2PMusicPlayer: React.FC<P2PMusicPlayerProps> = ({ ipfsCid, magnetURI }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const playerRef = useRef<P2PAudioPlayer | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -31,43 +31,47 @@ export const P2PMusicPlayer: React.FC<P2PMusicPlayerProps> = ({ magnetURI }) => 
   } = usePlayerStore();
 
   useEffect(() => {
-    if (!P2PAudioPlayer.isSupported()) {
-      setError('P2P is not supported in this browser');
-      setIsLoading(false);
-      return;
-    }
-
-    playerRef.current = new P2PAudioPlayer();
-
     const initPlayer = async () => {
       try {
         setIsLoading(true);
-        const { element, torrent } = await playerRef.current!.stream(magnetURI);
-        
-        audioRef.current = element;
-        
+        setError(null);
+
+        if (ipfsCid) {
+          // Use IPFS for audio playback
+          const audioElement = await createIPFSAudioElement(ipfsCid);
+          audioRef.current = audioElement;
+        } else if (magnetURI) {
+          // Fallback to WebTorrent if IPFS isn't available
+          // TODO: Implement WebTorrent fallback
+          setError('WebTorrent fallback not implemented');
+          setIsLoading(false);
+          return;
+        } else {
+          setError('No audio source provided');
+          setIsLoading(false);
+          return;
+        }
+
         // Set up event listeners
-        element.addEventListener('timeupdate', () => {
-          if (element.duration) {
-            setProgress((element.currentTime / element.duration) * 100);
-          }
-        });
+        if (audioRef.current) {
+          audioRef.current.addEventListener('timeupdate', () => {
+            if (audioRef.current?.duration) {
+              setProgress((audioRef.current.currentTime / audioRef.current.duration) * 100);
+            }
+          });
 
-        element.addEventListener('play', () => setIsPlaying(true));
-        element.addEventListener('pause', () => setIsPlaying(false));
-        element.addEventListener('ended', () => setIsPlaying(false));
+          audioRef.current.addEventListener('play', () => setIsPlaying(true));
+          audioRef.current.addEventListener('pause', () => setIsPlaying(false));
+          audioRef.current.addEventListener('ended', () => setIsPlaying(false));
+          audioRef.current.addEventListener('error', (e) => {
+            console.error('Audio element error:', e);
+            setError('Failed to play audio');
+          });
 
-        // Update torrent info
-        torrent.on('wire', () => {
-          setPeerCount(torrent.numPeers);
-        });
+          // Set initial volume
+          audioRef.current.volume = volume;
+        }
 
-        torrent.on('done', () => {
-          setIsSeeding(true);
-        });
-
-        setIsSeeding(torrent.done);
-        setPeerCount(torrent.numPeers);
         setIsLoading(false);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load track');
@@ -75,19 +79,27 @@ export const P2PMusicPlayer: React.FC<P2PMusicPlayerProps> = ({ magnetURI }) => 
       }
     };
 
-    initPlayer();
+    if (ipfsCid || magnetURI) {
+      initPlayer();
+    }
 
     return () => {
-      playerRef.current?.destroy();
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.remove();
+      }
     };
-  }, [magnetURI]);
+  }, [ipfsCid, magnetURI]);
 
   const handlePlayPause = () => {
     if (audioRef.current) {
       if (isPlaying) {
         audioRef.current.pause();
       } else {
-        audioRef.current.play();
+        audioRef.current.play().catch((err) => {
+          console.error('Play error:', err);
+          setError('Failed to play audio');
+        });
       }
     }
   };
@@ -100,6 +112,14 @@ export const P2PMusicPlayer: React.FC<P2PMusicPlayerProps> = ({ magnetURI }) => 
     }
   };
 
+  const handleProgressChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const newProgress = parseFloat(e.target.value);
+    if (audioRef.current && audioRef.current.duration) {
+      audioRef.current.currentTime = (newProgress / 100) * audioRef.current.duration;
+      setProgress(newProgress);
+    }
+  };
+
   if (error) {
     return (
       <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
@@ -109,27 +129,29 @@ export const P2PMusicPlayer: React.FC<P2PMusicPlayerProps> = ({ magnetURI }) => 
   }
 
   return (
-    <div className="p-4 bg-card border rounded-lg shadow-sm">
-      <div className="flex items-center gap-4 mb-4">
-        <div className="flex items-center gap-2">
+    <div className="p-6 bg-gradient-to-br from-card to-muted/30 border border-border/50 rounded-2xl shadow-xl backdrop-blur-sm">
+      <div className="flex items-center gap-6 mb-6">
+        <div className="flex items-center gap-3">
           <Button
             variant="outline"
             size="icon"
             onClick={() => {}}
             disabled={isLoading}
+            className="w-12 h-12 rounded-full border-border/50 hover:border-primary/50 hover:bg-primary/10 transition-all duration-300"
           >
-            <SkipBack className="h-4 w-4" />
+            <SkipBack className="h-5 w-5" />
           </Button>
           
           <Button
             size="icon"
             onClick={handlePlayPause}
             disabled={isLoading}
+            className="w-14 h-14 rounded-full bg-gradient-to-br from-primary to-accent hover:from-primary/90 hover:to-accent/90 shadow-lg hover:shadow-xl transition-all duration-300"
           >
             {isPlaying ? (
-              <Pause className="h-4 w-4" />
+              <Pause className="h-6 w-6" />
             ) : (
-              <Play className="h-4 w-4" />
+              <Play className="h-6 w-6" />
             )}
           </Button>
           
@@ -138,22 +160,34 @@ export const P2PMusicPlayer: React.FC<P2PMusicPlayerProps> = ({ magnetURI }) => 
             size="icon"
             onClick={() => {}}
             disabled={isLoading}
+            className="w-12 h-12 rounded-full border-border/50 hover:border-primary/50 hover:bg-primary/10 transition-all duration-300"
           >
-            <SkipForward className="h-4 w-4" />
+            <SkipForward className="h-5 w-5" />
           </Button>
         </div>
 
         <div className="flex-1">
-          <div className="h-2 bg-secondary rounded-full overflow-hidden">
+          <div className="h-3 bg-secondary/50 rounded-full overflow-hidden relative group">
             <div
-              className="h-full bg-primary transition-all duration-300"
+              className="h-full bg-gradient-to-r from-primary to-accent transition-all duration-300 ease-out relative"
               style={{ width: `${progress}%` }}
+            >
+              <div className="absolute right-0 top-1/2 -translate-y-1/2 w-4 h-4 bg-white rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={progress}
+              onChange={handleProgressChange}
+              disabled={isLoading}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
             />
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Volume2 className="h-4 w-4" />
+        <div className="flex items-center gap-3">
+          <Volume2 className="h-5 w-5 text-muted-foreground" />
           <input
             type="range"
             min="0"
@@ -161,24 +195,30 @@ export const P2PMusicPlayer: React.FC<P2PMusicPlayerProps> = ({ magnetURI }) => 
             step="0.1"
             value={volume}
             onChange={handleVolumeChange}
-            className="w-24"
+            className="w-28 h-2 bg-secondary/50 rounded-lg appearance-none cursor-pointer accent-primary"
           />
         </div>
       </div>
 
-      <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <div className="flex items-center gap-4">
-          <span className="flex items-center gap-1">
+      <div className="flex items-center justify-between text-sm">
+        <div className="flex items-center gap-6">
+          <span className="flex items-center gap-2 text-muted-foreground">
             <Users className="h-4 w-4" />
-            {peerCount} peers
+            <span className="font-medium">{peerCount} peers</span>
           </span>
           {isSeeding && (
-            <span className="text-green-500 flex items-center gap-1">
-              ⚡ Seeding
+            <span className="flex items-center gap-2 text-green-500 animate-pulse">
+              <Zap className="h-4 w-4" />
+              <span className="font-medium">Seeding</span>
             </span>
           )}
         </div>
-        {isLoading && <span>Loading...</span>}
+        {isLoading && (
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+            <span>Loading...</span>
+          </div>
+        )}
       </div>
     </div>
   );

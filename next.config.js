@@ -1,14 +1,11 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: 'export',
   images: {
     unoptimized: true,
   },
   experimental: {
     turbo: {}
   },
-  // GitHub Pages configuration
-  basePath: '',
   // Webpack configuration for polyfills
   webpack: (config, { isServer }) => {
     if (!isServer) {

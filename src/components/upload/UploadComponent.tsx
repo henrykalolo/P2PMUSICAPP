@@ -1,9 +1,12 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
-import { Upload, FileAudio, X, Loader2 } from 'lucide-react';
-import { initIPFS, isIPFSSupported, uploadBrowserFile, uploadTrackMetadata, IPFSUploadResult } from '@/lib/ipfs';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Upload, FileAudio, X, Loader2, Edit3, Image as ImageIcon } from 'lucide-react';
+import { UnifiedStorage, StorageSystem, StorageOptions, StorageResult } from '@/lib/storage/unifiedStorage';
+import { parseBlob } from 'music-metadata';
 
 interface UploadComponentProps {
   onUploadComplete?: (metadata: {
@@ -13,44 +16,33 @@ interface UploadComponentProps {
     genre: string;
     year: number;
     duration: number;
-    ipfsCid: string;
-    metadataCid: string;
+    storageResult: StorageResult;
   }) => void;
+}
+
+interface TrackMetadata {
+  title: string;
+  artist: string;
+  album: string;
+  genre: string;
+  year: number;
+  duration: number;
+  description: string;
+  coverArtUrl?: string;
+  coverArtData?: string; // Base64 encoded cover art
 }
 
 export const UploadComponent: React.FC<UploadComponentProps> = ({
   onUploadComplete,
 }) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [isIPFSReady, setIsIPFSReady] = useState(false);
-  const [isInitializing, setIsInitializing] = useState(true);
-
-  // Initialize IPFS on component mount
-  useEffect(() => {
-    const initializeIPFS = async () => {
-      if (!isIPFSSupported()) {
-        setError('IPFS is not supported in this browser. Please use a modern browser with WebRTC support.');
-        setIsInitializing(false);
-        return;
-      }
-
-      try {
-        await initIPFS({ debug: true });
-        setIsIPFSReady(true);
-      } catch (err) {
-        console.error('IPFS initialization error:', err);
-        setError('Failed to initialize IPFS. Please try again.');
-      } finally {
-        setIsInitializing(false);
-      }
-    };
-
-    initializeIPFS();
-  }, []);
+  const [metadata, setMetadata] = useState<TrackMetadata | null>(null);
+  const [isExtractingMetadata, setIsExtractingMetadata] = useState(false);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -107,16 +99,108 @@ export const UploadComponent: React.FC<UploadComponentProps> = ({
     }
 
     setSelectedFile(file);
+    extractMetadata(file);
   };
 
-  const clearFile = () => {
-    setSelectedFile(null);
-    setError(null);
-    setUploadProgress(0);
+  const extractMetadata = async (file: File) => {
+    setIsExtractingMetadata(true);
+    try {
+      // Extract audio duration
+      const duration = await new Promise<number>((resolve) => {
+        const audio = new Audio();
+        audio.src = URL.createObjectURL(file);
+        audio.addEventListener('loadedmetadata', () => {
+          resolve(Math.floor(audio.duration));
+          URL.revokeObjectURL(audio.src);
+        });
+        audio.addEventListener('error', () => {
+          resolve(0);
+          URL.revokeObjectURL(audio.src);
+        });
+      });
+
+      // Force extract embedded metadata using music-metadata library
+      let extractedMetadata: TrackMetadata = {
+        title: file.name.replace(/\.[^/.]+$/, ''),
+        artist: 'Unknown Artist',
+        album: 'Unknown Album',
+        genre: '',
+        year: new Date().getFullYear(),
+        duration,
+        description: 'Uploaded via P2P Music Platform',
+      };
+
+      try {
+        // Use parseBlob for browser compatibility
+        const blob = new Blob([file], { type: file.type });
+        const metadata = await parseBlob(blob);
+        
+        // Extract title from embedded metadata
+        if (metadata.common && metadata.common.title) {
+          extractedMetadata.title = metadata.common.title;
+        }
+        
+        // Extract artist from embedded metadata
+        if (metadata.common && metadata.common.artist) {
+          extractedMetadata.artist = metadata.common.artist;
+        } else if (metadata.common && metadata.common.artists && metadata.common.artists.length > 0) {
+          extractedMetadata.artist = metadata.common.artists.join(', ');
+        }
+        
+        // Extract album from embedded metadata
+        if (metadata.common && metadata.common.album) {
+          extractedMetadata.album = metadata.common.album;
+        }
+        
+        // Extract genre from embedded metadata
+        if (metadata.common && metadata.common.genre && metadata.common.genre.length > 0) {
+          extractedMetadata.genre = metadata.common.genre[0];
+        }
+        
+        // Extract year from embedded metadata
+        if (metadata.common && metadata.common.year) {
+          extractedMetadata.year = metadata.common.year;
+        }
+        
+        // Extract cover art from embedded metadata
+        if (metadata.common && metadata.common.picture && metadata.common.picture.length > 0) {
+          const picture = metadata.common.picture[0];
+          const mimeType = picture.format || 'image/jpeg';
+          // Use browser-compatible base64 conversion
+          const binaryString = picture.data.reduce((acc: string, byte: number) => acc + String.fromCharCode(byte), '');
+          const base64 = btoa(binaryString);
+          const dataUrl = `data:${mimeType};base64,${base64}`;
+          extractedMetadata.coverArtUrl = dataUrl;
+          extractedMetadata.coverArtData = base64;
+        }
+        
+        console.log('Embedded metadata extracted successfully:', {
+          title: extractedMetadata.title,
+          artist: extractedMetadata.artist,
+          album: extractedMetadata.album,
+          hasCoverArt: !!extractedMetadata.coverArtUrl
+        });
+      } catch (metadataError) {
+        console.warn('Could not extract embedded metadata, using defaults:', metadataError);
+      }
+
+      setMetadata(extractedMetadata);
+    } catch (err) {
+      console.error('Metadata extraction error:', err);
+      setError('Failed to extract metadata');
+    } finally {
+      setIsExtractingMetadata(false);
+    }
   };
 
-  const handleUpload = async () => {
-    if (!selectedFile || !isIPFSReady) return;
+  const handleUpdateMetadata = (field: keyof TrackMetadata, value: string | number) => {
+    if (metadata) {
+      setMetadata(prev => prev ? { ...prev, [field]: value } : null);
+    }
+  };
+
+  const handleConfirmMetadata = async () => {
+    if (!selectedFile || !metadata) return;
 
     setIsUploading(true);
     setUploadProgress(0);
@@ -141,39 +225,26 @@ export const UploadComponent: React.FC<UploadComponentProps> = ({
         throw new Error(error.error || 'Failed to initialize upload');
       }
 
-      // Step 2: Upload audio file to IPFS
-      setUploadProgress(10);
-      
-      const audioResult: IPFSUploadResult = await uploadBrowserFile(selectedFile, {
+      // Step 2: Upload to unified storage system
+      const storageOptions: StorageOptions = {
         onProgress: (progress) => {
-          // Map IPFS upload progress (0-100) to our progress (10-70)
-          const mappedProgress = 10 + (progress.percentage * 0.6);
-          setUploadProgress(Math.min(70, Math.round(mappedProgress)));
+          setUploadProgress(Math.min(80, Math.round(progress)));
         },
-      });
+        cache: true,
+      };
 
-      // Step 3: Extract metadata (duration would require audio analysis)
-      // For now, use filename as title
-      const title = selectedFile.name.replace(/\.[^/.]+$/, '');
-      
-      setUploadProgress(75);
-
-      // Step 4: Upload metadata to IPFS
-      const metadataResult = await uploadTrackMetadata({
-        title,
-        artist: 'Unknown Artist', // Would be extracted or provided by user
-        album: 'Unknown Album',
-        genre: '',
-        year: new Date().getFullYear(),
-        duration: 0, // Would be extracted from audio file
-        audioCid: audioResult.cid,
-        uploadedAt: new Date().toISOString(),
-        uploadedBy: 'current-user', // Would come from auth context
-      });
+      const storageResult = await UnifiedStorage.uploadFile(
+        selectedFile,
+        metadata,
+        {
+          ...storageOptions,
+          redundant: true, // Upload to multiple systems for redundancy
+        }
+      );
 
       setUploadProgress(90);
 
-      // Step 5: Save to backend database
+      // Step 3: Save to backend database
       const saveResponse = await fetch('/api/tracks', {
         method: 'POST',
         headers: {
@@ -181,16 +252,18 @@ export const UploadComponent: React.FC<UploadComponentProps> = ({
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
         body: JSON.stringify({
-          title,
-          artist: 'Unknown Artist',
-          album: 'Unknown Album',
-          genre: '',
-          year: new Date().getFullYear(),
-          duration: 0,
-          ipfsCid: audioResult.cid,
-          metadataCid: metadataResult.cid,
+          title: metadata.title,
+          artist: metadata.artist,
+          album: metadata.album,
+          genre: metadata.genre,
+          year: metadata.year,
+          duration: metadata.duration,
+          ipfsCid: storageResult.ipfsCid || null,
+          magnetUri: storageResult.magnetUri || null,
+          storageSystem: storageResult.system,
           fileSize: selectedFile.size,
           mimeType: selectedFile.type,
+          coverArtUrl: metadata.coverArtUrl || null,
         }),
       });
 
@@ -203,14 +276,13 @@ export const UploadComponent: React.FC<UploadComponentProps> = ({
 
       if (onUploadComplete) {
         onUploadComplete({
-          title,
-          artist: 'Unknown Artist',
-          album: 'Unknown Album',
-          genre: '',
-          year: new Date().getFullYear(),
-          duration: 0,
-          ipfsCid: audioResult.cid,
-          metadataCid: metadataResult.cid,
+          title: metadata.title,
+          artist: metadata.artist,
+          album: metadata.album,
+          genre: metadata.genre,
+          year: metadata.year,
+          duration: metadata.duration,
+          storageResult,
         });
       }
 
@@ -223,17 +295,12 @@ export const UploadComponent: React.FC<UploadComponentProps> = ({
     }
   };
 
-  if (isInitializing) {
-    return (
-      <div className="w-full max-w-md mx-auto">
-        <div className="border-2 border-dashed rounded-lg p-8 text-center">
-          <Loader2 className="mx-auto h-12 w-12 text-muted-foreground mb-4 animate-spin" />
-          <p className="text-lg font-medium">Initializing IPFS...</p>
-          <p className="text-sm text-muted-foreground">Please wait while we set up the decentralized network</p>
-        </div>
-      </div>
-    );
-  }
+  const clearFile = () => {
+    setSelectedFile(null);
+    setMetadata(null);
+    setError(null);
+    setUploadProgress(0);
+  };
 
   return (
     <div className="w-full max-w-md mx-auto">
@@ -246,7 +313,7 @@ export const UploadComponent: React.FC<UploadComponentProps> = ({
             isDragging
               ? 'border-primary bg-primary/5'
               : 'border-border hover:border-primary/50'
-          } ${!isIPFSReady ? 'opacity-50 cursor-not-allowed' : ''}`}
+          }`}
         >
           <FileAudio className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
           <p className="text-lg font-medium mb-2">
@@ -255,23 +322,35 @@ export const UploadComponent: React.FC<UploadComponentProps> = ({
           <p className="text-sm text-muted-foreground mb-4">
             or click to browse (MP3, OGG, WAV, FLAC, M4A up to 100MB)
           </p>
+          <p className="text-sm text-blue-600 mb-4">
+            Automatic fallback system: IPFS → WebTorrent → Local Storage
+          </p>
           <input
             type="file"
             accept="audio/*"
             onChange={handleFileSelect}
             className="hidden"
             id="file-upload"
-            disabled={!isIPFSReady}
+            ref={fileInputRef}
           />
-          <label htmlFor="file-upload">
-            <Button variant="outline" asChild disabled={!isIPFSReady}>
-              <span>Select File</span>
-            </Button>
-          </label>
+          <Button
+            variant="outline"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            Select File
+          </Button>
         </div>
-      ) : (
-        <div className="border rounded-lg p-4">
-          <div className="flex items-center justify-between mb-4">
+      ) : isExtractingMetadata ? (
+        <div className="border rounded-lg p-8 text-center">
+          <Loader2 className="mx-auto h-8 w-8 text-primary animate-spin mb-4" />
+          <p className="text-lg font-medium mb-2">Extracting Metadata...</p>
+          <p className="text-sm text-muted-foreground">
+            Analyzing your audio file
+          </p>
+        </div>
+      ) : metadata ? (
+        <div className="border rounded-lg p-6">
+          <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
               <FileAudio className="h-8 w-8 text-primary" />
               <div>
@@ -293,6 +372,120 @@ export const UploadComponent: React.FC<UploadComponentProps> = ({
             )}
           </div>
 
+          <div className="mb-6">
+            <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+              <Edit3 className="h-5 w-5" />
+              Track Metadata
+            </h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-1">
+                  Title
+                </label>
+                <Input
+                  value={metadata.title}
+                  onChange={(e) => handleUpdateMetadata('title', e.target.value)}
+                  disabled={isUploading}
+                  className="w-full"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-1">
+                  Artist
+                </label>
+                <Input
+                  value={metadata.artist}
+                  onChange={(e) => handleUpdateMetadata('artist', e.target.value)}
+                  disabled={isUploading}
+                  className="w-full"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-1">
+                  Album
+                </label>
+                <Input
+                  value={metadata.album}
+                  onChange={(e) => handleUpdateMetadata('album', e.target.value)}
+                  disabled={isUploading}
+                  className="w-full"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-1">
+                  Genre
+                </label>
+                <Input
+                  value={metadata.genre}
+                  onChange={(e) => handleUpdateMetadata('genre', e.target.value)}
+                  disabled={isUploading}
+                  className="w-full"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-1">
+                  Year
+                </label>
+                <Input
+                  type="number"
+                  value={metadata.year}
+                  onChange={(e) => handleUpdateMetadata('year', parseInt(e.target.value) || new Date().getFullYear())}
+                  disabled={isUploading}
+                  className="w-full"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-1">
+                  Description
+                </label>
+                <Textarea
+                  value={metadata.description}
+                  onChange={(e) => handleUpdateMetadata('description', e.target.value)}
+                  disabled={isUploading}
+                  className="w-full"
+                  rows={3}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-1">
+                  Duration
+                </label>
+                <Input
+                  value={`${Math.floor(metadata.duration / 60)}:${(metadata.duration % 60).toString().padStart(2, '0')}`}
+                  disabled
+                  className="w-full bg-muted"
+                />
+              </div>
+
+              {/* Cover Art Preview */}
+              {metadata.coverArtUrl && (
+                <div>
+                  <label className="block text-sm font-medium text-muted-foreground mb-1">
+                    Cover Art
+                  </label>
+                  <div className="relative inline-block">
+                    <img
+                      src={metadata.coverArtUrl}
+                      alt="Album cover"
+                      className="w-32 h-32 rounded-lg object-cover border"
+                    />
+                    <div className="absolute -top-2 -right-2 bg-green-500 text-white rounded-full p-1">
+                      <ImageIcon className="h-3 w-3" />
+                    </div>
+                  </div>
+                  <p className="text-xs text-green-600 mt-1">✓ Embedded cover art detected</p>
+                </div>
+              )}
+            </div>
+          </div>
+
           {isUploading && (
             <div className="mb-4">
               <div className="h-2 bg-secondary rounded-full overflow-hidden">
@@ -303,8 +496,8 @@ export const UploadComponent: React.FC<UploadComponentProps> = ({
               </div>
               <p className="text-sm text-muted-foreground mt-2 text-center">
                 {uploadProgress < 10 && 'Initializing...'}
-                {uploadProgress >= 10 && uploadProgress < 70 && 'Uploading to IPFS...'}
-                {uploadProgress >= 70 && uploadProgress < 90 && 'Uploading metadata...'}
+                {uploadProgress >= 10 && uploadProgress < 80 && 'Uploading to decentralized storage...'}
+                {uploadProgress >= 80 && uploadProgress < 90 && 'Verifying upload...'}
                 {uploadProgress >= 90 && uploadProgress < 100 && 'Saving to database...'}
                 {uploadProgress === 100 && 'Complete!'}
                 {' '}{uploadProgress}%
@@ -313,8 +506,8 @@ export const UploadComponent: React.FC<UploadComponentProps> = ({
           )}
 
           <Button
-            onClick={handleUpload}
-            disabled={isUploading || !isIPFSReady}
+            onClick={handleConfirmMetadata}
+            disabled={isUploading}
             className="w-full"
           >
             {isUploading ? (
@@ -322,10 +515,10 @@ export const UploadComponent: React.FC<UploadComponentProps> = ({
             ) : (
               <Upload className="mr-2 h-4 w-4" />
             )}
-            {isUploading ? 'Uploading to IPFS...' : 'Upload Track'}
+            {isUploading ? 'Uploading...' : 'Confirm & Upload Track'}
           </Button>
         </div>
-      )}
+      ) : null}
 
       {error && (
         <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">

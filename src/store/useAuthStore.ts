@@ -10,6 +10,8 @@ export interface User {
   canUpload: boolean;
   onboardingCompleted: boolean;
   isFounderUser: boolean;
+  trustScore?: number;
+  badge?: string;
 }
 
 interface AuthState {

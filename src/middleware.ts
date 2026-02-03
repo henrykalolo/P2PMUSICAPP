@@ -5,19 +5,25 @@ import { verifyToken } from '@/lib/auth/jwt';
 // Routes that require authentication
 const protectedRoutes = [
   '/api/onboarding',
-  '/api/tracks',
   '/api/social',
   '/api/upload',
 ];
 
 // Routes that require onboarding completion
 const onboardingRequiredRoutes = [
-  '/api/tracks',
   '/api/upload',
 ];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  const { method } = request;
+
+  // Allow unauthenticated GET requests to /api/tracks and /api/social/profile
+  if ((pathname.startsWith('/api/tracks') && method === 'GET') || 
+      (pathname.startsWith('/api/social/profile') && method === 'GET') ||
+      (pathname.startsWith('/api/social/likes') && method === 'GET')) {
+    return NextResponse.next();
+  }
 
   // Check if route is protected
   const isProtected = protectedRoutes.some(route => pathname.startsWith(route));

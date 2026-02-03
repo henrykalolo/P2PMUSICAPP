@@ -13,7 +13,8 @@ interface FeedItemProps {
     album: string;
     genre: string;
     duration: number;
-    magnetUri: string;
+    magnetUri?: string;
+    ipfsCid?: string;
     coverArtUrl?: string;
     createdAt: string;
     author: {
@@ -51,8 +52,11 @@ export const FeedItem: React.FC<FeedItemProps> = ({ post }) => {
   };
 
   const handleShare = () => {
-    navigator.clipboard.writeText(post.magnetUri);
-    alert('Magnet link copied to clipboard!');
+    const shareText = post.magnetUri || (post.ipfsCid ? `https://ipfs.io/ipfs/${post.ipfsCid}` : '');
+    if (shareText) {
+      navigator.clipboard.writeText(shareText);
+      alert('Link copied to clipboard!');
+    }
   };
 
   const formatDuration = (seconds: number): string => {

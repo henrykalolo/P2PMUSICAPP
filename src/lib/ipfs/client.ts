@@ -46,7 +46,7 @@ export async function initIPFS(config: IPFSConfig = {}): Promise<Helia> {
 
   try {
     // Dynamic imports for libp2p modules
-    const [{ webRTC }, { webSockets }, { webTransport }, { noise }, { mplex }, { yamux }, { bootstrap }, { identify }, { kadDHT }, { circuitRelayTransport }] = await Promise.all([
+    const [{ webRTC }, { webSockets }, { webTransport }, { noise }, { mplex }, { yamux }, { bootstrap }, { identify }, { kadDHT }, { circuitRelayTransport }, { ping }] = await Promise.all([
       import('@libp2p/webrtc'),
       import('@libp2p/websockets'),
       import('@libp2p/webtransport'),
@@ -57,6 +57,7 @@ export async function initIPFS(config: IPFSConfig = {}): Promise<Helia> {
       import('@libp2p/identify'),
       import('@libp2p/kad-dht'),
       import('@libp2p/circuit-relay-v2'),
+      import('@libp2p/ping'),
     ]);
 
     const libp2pOptions: any = {
@@ -81,6 +82,7 @@ export async function initIPFS(config: IPFSConfig = {}): Promise<Helia> {
         identify: identify(),
         dht: kadDHT(),
         relay: circuitRelayTransport(),
+        ping: ping(),
       },
       ...config.libp2pConfig,
     };
@@ -109,11 +111,11 @@ export async function initIPFS(config: IPFSConfig = {}): Promise<Helia> {
 }
 
 /**
- * Get the existing Helia instance or throw if not initialized
+ * Get the existing Helia instance or initialize it if not already done
  */
-export function getHelia(): Helia {
+export async function getHelia(): Promise<Helia> {
   if (!heliaInstance) {
-    throw new Error('IPFS not initialized. Call initIPFS() first.');
+    heliaInstance = await initIPFS();
   }
   return heliaInstance;
 }
@@ -121,9 +123,10 @@ export function getHelia(): Helia {
 /**
  * Get the DAG JSON instance
  */
-export function getDAGJSON(): DAGJSON {
+export async function getDAGJSON(): Promise<DAGJSON> {
   if (!dagJsonInstance) {
-    throw new Error('IPFS not initialized. Call initIPFS() first.');
+    const helia = await getHelia();
+    dagJsonInstance = dagJson(helia as any);
   }
   return dagJsonInstance;
 }
@@ -131,9 +134,10 @@ export function getDAGJSON(): DAGJSON {
 /**
  * Get the JSON instance
  */
-export function getJSON(): JSON {
+export async function getJSON(): Promise<JSON> {
   if (!jsonInstance) {
-    throw new Error('IPFS not initialized. Call initIPFS() first.');
+    const helia = await getHelia();
+    jsonInstance = json(helia as any);
   }
   return jsonInstance;
 }
@@ -141,9 +145,10 @@ export function getJSON(): JSON {
 /**
  * Get the strings instance
  */
-export function getStrings(): Strings {
+export async function getStrings(): Promise<Strings> {
   if (!stringsInstance) {
-    throw new Error('IPFS not initialized. Call initIPFS() first.');
+    const helia = await getHelia();
+    stringsInstance = strings(helia as any);
   }
   return stringsInstance;
 }

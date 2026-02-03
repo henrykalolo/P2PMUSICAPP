@@ -1,6 +1,6 @@
 {
   "name": "p2p-music-platform",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -8,8 +8,15 @@
     "start": "next start",
     "lint": "next lint",
     "db:migrate": "node scripts/migrate.js",
-    "db:seed": "DATABASE_URL=\"postgresql://musicuser:yourpassword@localhost:5432/musicapp\" node scripts/seed.js",
-    "tracker:start": "bittorrent-tracker --ws --port 8000"
+    "db:setup": "node scripts/setup-db.js",
+    "db:seed": "node scripts/seed.js",
+    "tracker:start": "bittorrent-tracker --ws --port 8000",
+    "redis:start": "redis-server --port 6379",
+    "services:start": "concurrently \"npm run tracker:start\" \"npm run redis:start\"",
+    "dev:full": "concurrently \"npm run services:start\" \"npm run dev\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui"
   },
   "dependencies": {
     "@helia/dag-json": "^5.0.4",
@@ -59,15 +66,22 @@
     "@tailwindcss/postcss": "^4.1.18",
     "@types/bcryptjs": "^2.4.6",
     "@types/node": "^22.12.0",
+    "@types/pg": "^8.11.11",
     "@types/react": "^19.0.8",
     "@types/react-dom": "^19.0.3",
     "@types/uuid": "^10.0.0",
     "@types/ws": "^8.5.14",
     "autoprefixer": "^10.4.24",
+    "concurrently": "^9.1.2",
     "eslint": "^9.19.0",
     "eslint-config-next": "15.1.6",
     "postcss": "^8.5.1",
     "tailwindcss": "^4.0.1",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "vitest": "^3.0.9",
+    "@testing-library/react": "^16.2.0",
+    "@testing-library/user-event": "^14.6.1",
+    "jsdom": "^26.0.0"
   }
 }

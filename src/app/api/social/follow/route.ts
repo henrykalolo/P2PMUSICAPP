@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { verifyToken } from '@/lib/auth/jwt';
+import { notifyFollow } from '@/lib/notifications/helper';
 
 // POST /api/social/follow - Follow a user
 export async function POST(request: NextRequest) {
@@ -62,6 +63,16 @@ export async function POST(request: NextRequest) {
        ON CONFLICT (follower_id, following_id) DO NOTHING`,
       [payload.userId, followingId]
     );
+
+    // Get follower info for notification
+    const followerResult = await query(
+      'SELECT username, avatar_url FROM users WHERE id = $1',
+      [payload.userId]
+    );
+    const follower = followerResult.rows[0];
+
+    // Send notification to the followed user
+    await notifyFollow(followingId, follower.username, follower.avatar_url);
 
     // Update user's follows count
     const countResult = await query(

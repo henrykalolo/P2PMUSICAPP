@@ -13,9 +13,9 @@ let unixfsInstance: UnixFS | null = null;
 /**
  * Get or create the UnixFS instance
  */
-function getUnixFS(): UnixFS {
+async function getUnixFS(): Promise<UnixFS> {
   if (!unixfsInstance) {
-    const helia = getHelia();
+    const helia = await getHelia();
     unixfsInstance = unixfs(helia as any);
   }
   return unixfsInstance;
@@ -49,7 +49,7 @@ export async function retrieveFile(
   cid: string,
   options: StreamOptions = {}
 ): Promise<Uint8Array> {
-  const ufs = getUnixFS();
+  const ufs = await getUnixFS();
   const parsedCid = parseCID(cid);
 
   try {
@@ -128,7 +128,7 @@ export async function streamAudioFromIPFS(
   cid: string,
   mimeType: string = 'audio/mpeg'
 ): Promise<ReadableStream<Uint8Array>> {
-  const ufs = getUnixFS();
+  const ufs = await getUnixFS();
   const parsedCid = parseCID(cid);
 
   try {
@@ -191,7 +191,7 @@ export async function createIPFSAudioElement(
  */
 export async function retrieveJSON<T = unknown>(cid: string): Promise<T> {
   const { getJSON } = await import('./client');
-  const json = getJSON();
+  const json = await getJSON();
   const parsedCid = parseCID(cid);
 
   try {
@@ -210,7 +210,7 @@ export async function retrieveJSON<T = unknown>(cid: string): Promise<T> {
  */
 export async function retrieveTrackMetadata(cid: string) {
   const { getDAGJSON } = await import('./client');
-  const dagJson = getDAGJSON();
+  const dagJson = await getDAGJSON();
   const parsedCid = parseCID(cid);
 
   try {
@@ -228,7 +228,7 @@ export async function retrieveTrackMetadata(cid: string) {
  * @returns Boolean indicating if CID is available locally
  */
 export async function isAvailableLocally(cid: string): Promise<boolean> {
-  const helia = getHelia();
+  const helia = await getHelia();
   const parsedCid = parseCID(cid);
 
   try {
@@ -250,7 +250,7 @@ export async function isAvailableLocally(cid: string): Promise<boolean> {
  * @returns Size in bytes
  */
 export async function getFileSize(cid: string): Promise<number> {
-  const ufs = getUnixFS();
+  const ufs = await getUnixFS();
   const parsedCid = parseCID(cid);
 
   try {

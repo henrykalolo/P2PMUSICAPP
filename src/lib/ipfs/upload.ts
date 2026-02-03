@@ -13,9 +13,9 @@ let unixfsInstance: UnixFS | null = null;
 /**
  * Get or create the UnixFS instance
  */
-function getUnixFS(): UnixFS {
+async function getUnixFS(): Promise<UnixFS> {
   if (!unixfsInstance) {
-    const helia = getHelia();
+    const helia = await getHelia();
     unixfsInstance = unixfs(helia as any);
   }
   return unixfsInstance;
@@ -69,7 +69,7 @@ export async function uploadFile(
     chunkSize?: number;
   } = {}
 ): Promise<IPFSUploadResult> {
-  const ufs = getUnixFS();
+  const ufs = await getUnixFS();
   const totalBytes = fileBuffer.length;
 
   try {
@@ -138,7 +138,7 @@ export async function uploadTrackMetadata(
   metadata: TrackMetadata
 ): Promise<IPFSUploadResult> {
   const { getJSON } = await import('./client');
-  const json = getJSON();
+  const json = await getJSON();
 
   try {
     const cid = await json.add(metadata);
@@ -179,7 +179,7 @@ export async function uploadTrackPackage(
   metadataCid: string;
   coverArtCid?: string;
 }> {
-  const ufs = getUnixFS();
+  const ufs = await getUnixFS();
 
   try {
     // Upload audio file
@@ -257,7 +257,7 @@ export function getLocalIPFSUrl(cid: string): string {
  * @param cid - CID to pin
  */
 export async function pinCID(cid: string): Promise<void> {
-  const helia = getHelia();
+  const helia = await getHelia();
   const parsedCid = CID.parse(cid);
   
   try {
@@ -275,7 +275,7 @@ export async function pinCID(cid: string): Promise<void> {
  * @param cid - CID to unpin
  */
 export async function unpinCID(cid: string): Promise<void> {
-  const helia = getHelia();
+  const helia = await getHelia();
   const parsedCid = CID.parse(cid);
   
   try {

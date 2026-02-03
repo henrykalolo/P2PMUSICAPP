@@ -1,55 +1,17 @@
-# P2P Music Platform - Phase 1 Setup Guide
+# P2P Music Platform - Local Development Setup Guide
 
 ## Overview
 
-Phase 1 of the P2P Music Platform has been initialized with the following components:
+This guide covers setting up the P2P Music Platform for local development without Docker.
 
-- Next.js 15 with TypeScript
-- Tailwind CSS for styling
-- PostgreSQL database with complete schema
-- WebTorrent P2P infrastructure
-- WebAuthn passwordless authentication
-- Onboarding system with music preferences
-- Social features (follow, like, share)
-- Upload functionality with metadata extraction
+## Prerequisites
 
-## Project Structure
+- Node.js 20+
+- PostgreSQL 15+
+- Redis 7+
+- WebTorrent CLI (optional, for tracker)
 
-```
-├── src/
-│   ├── app/                    # Next.js App Router
-│   │   ├── api/               # API Routes
-│   │   │   ├── auth/          # Authentication endpoints
-│   │   │   ├── onboarding/    # Onboarding endpoints
-│   │   │   ├── social/        # Social features endpoints
-│   │   │   ├── tracks/        # Track management endpoints
-│   │   │   └── upload/        # Upload endpoints
-│   │   ├── globals.css        # Global styles
-│   │   ├── layout.tsx         # Root layout
-│   │   └── page.tsx           # Home page
-│   ├── components/
-│   │   ├── feed/              # Feed components
-│   │   ├── player/            # P2P player components
-│   │   ├── ui/                # UI components (shadcn)
-│   │   └── upload/            # Upload components
-│   ├── lib/
-│   │   ├── auth/              # Authentication utilities
-│   │   ├── db/                # Database utilities
-│   │   ├── p2p/               # P2P utilities
-│   │   └── utils.ts           # Utility functions
-│   ├── store/                 # Zustand stores
-│   └── middleware.ts          # Next.js middleware
-├── scripts/
-│   └── migrate.js             # Database migration script
-├── tracker.js                 # WebTorrent tracker server
-├── package.json               # Dependencies
-├── tsconfig.json              # TypeScript configuration
-├── tailwind.config.ts         # Tailwind configuration
-├── next.config.js             # Next.js configuration
-└── .env.example               # Environment variables template
-```
-
-## Installation
+## Quick Start
 
 ### 1. Install Dependencies
 
@@ -64,106 +26,82 @@ cp .env.example .env.local
 # Edit .env.local with your configuration
 ```
 
-### 3. Set Up PostgreSQL
-
-Install PostgreSQL 17 and create the database:
+### 3. Set Up Database
 
 ```bash
-# Ubuntu/Debian
-sudo apt install postgresql-17
-sudo systemctl start postgresql
+# Option A: Automated setup (recommended)
+npm run db:setup
 
-# Create database and user
+# Option B: Manual setup
+# Install PostgreSQL and create database
+sudo apt install postgresql-15
+sudo systemctl start postgresql
 sudo -u postgres psql -c "CREATE DATABASE musicapp;"
 sudo -u postgres psql -c "CREATE USER musicuser WITH PASSWORD 'yourpassword';"
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE musicapp TO musicuser;"
-```
 
-### 4. Run Database Migrations
-
-```bash
+# Run migrations
 npm run db:migrate
 ```
 
-### 5. Start the WebTorrent Tracker
+### 4. Start All Services
 
 ```bash
-npm run tracker:start
-# Or directly:
-node tracker.js
+# Start everything (tracker + redis + dev server)
+npm run dev:full
+
+# Or start individually:
+npm run tracker:start  # WebTorrent tracker on port 8000
+npm run redis:start    # Redis on port 6379
+npm run dev            # Next.js app on port 3000
 ```
 
-### 6. Start the Development Server
+## Testing
+
+### Run Tests
 
 ```bash
-npm run dev
+# Run all tests
+npm test
+
+# Run tests in watch mode
+npm run test:watch
+
+# Run tests with UI
+npm run test:ui
 ```
 
-## Key Features Implemented
+### Test Structure
 
-### 1. Authentication System
-- WebAuthn/Passkey-based passwordless authentication
-- JWT token management
-- Secure credential storage
+```
+src/tests/
+├── unit/           # Unit tests
+├── integration/    # Integration tests
+└── e2e/           # End-to-end tests (if configured)
+```
 
-### 2. Onboarding Flow
-- Music preferences selection (minimum 5)
-- User discovery and following (minimum 10)
-- Founder user exemption (first 11 users)
+## Available Scripts
 
-### 3. P2P Audio Player
-- WebTorrent-based streaming
-- Sequential piece selection for instant playback
-- Real-time peer count display
-- Seeding status indicator
-
-### 4. Social Features
-- Follow/unfollow users
-- Like tracks
-- Share magnet links
-- Social feed from followed users
-
-### 5. Upload System
-- Drag-and-drop file upload
-- Metadata extraction from audio files
-- Torrent creation and seeding
-- Upload quota management
-
-### 6. Database Schema
-- Users table with artist capabilities
-- Music preferences
-- Social graph (follows)
-- Posts (tracks)
-- Interactions (likes, comments)
-- WebAuthn credentials
-
-## API Endpoints
-
-### Authentication
-- `POST /api/auth/register` - User registration
-- `POST /api/auth/login` - User login
-
-### Onboarding
-- `GET /api/onboarding/status` - Check onboarding status
-- `POST /api/onboarding/preferences` - Save music preferences
-- `GET /api/onboarding/suggested-users` - Get suggested users
-
-### Tracks
-- `GET /api/tracks` - List tracks from followed users
-- `POST /api/tracks` - Upload new track
-
-### Social
-- `POST /api/social/follow` - Follow a user
-- `DELETE /api/social/follow` - Unfollow a user
-
-### Upload
-- `POST /api/upload` - Initialize upload session
+| Script | Description |
+|--------|-------------|
+| `npm run dev` | Start Next.js dev server |
+| `npm run build` | Build for production |
+| `npm run start` | Start production server |
+| `npm run lint` | Run ESLint |
+| `npm run db:setup` | Set up database and run migrations |
+| `npm run db:migrate` | Run database migrations |
+| `npm run db:seed` | Seed database with test data |
+| `npm run tracker:start` | Start WebTorrent tracker |
+| `npm run redis:start` | Start Redis server |
+| `npm run services:start` | Start all services (tracker + redis) |
+| `npm run dev:full` | Start all services + dev server |
+| `npm test` | Run tests with Vitest |
 
 ## Environment Variables
 
 ```bash
 # Database
-DATABASE_URL=postgresql://user:password@localhost:5432/musicapp
+DATABASE_URL=postgresql://musicuser:yourpassword@localhost:5432/musicapp
 
 # Security
 JWT_SECRET=your-random-64-byte-hex
@@ -173,25 +111,43 @@ WEBAUTHN_ORIGIN=http://localhost:3000
 
 # P2P
 TRACKER_URL=ws://localhost:8000
-STUN_SERVER=stun:stun.l.google.com:19302
+NEXT_PUBLIC_TURN_SERVER=turn:localhost:3478
 
 # Feature Flags
 ENABLE_P2P=true
 ENABLE_BACKGROUND_SEEDING=true
 ```
 
-## Next Steps
+## Troubleshooting
 
-1. **Install dependencies** with `npm install`
-2. **Set up PostgreSQL** database
-3. **Configure environment variables**
-4. **Run migrations** to create database tables
-5. **Start the tracker** server
-6. **Start the dev server** and test the application
+### PostgreSQL Connection Issues
 
-## Notes
+```bash
+# Check if PostgreSQL is running
+pg_isready
 
-- The TypeScript errors shown in the editor are expected until dependencies are installed
-- WebTorrent requires browser environment - server-side rendering is handled carefully
-- The tracker runs as a separate Node.js process
-- Founder users (first 11) bypass onboarding requirements
+# Restart PostgreSQL
+sudo systemctl restart postgresql
+```
+
+### Redis Connection Issues
+
+```bash
+# Check if Redis is running
+redis-cli ping
+
+# Start Redis
+redis-server
+```
+
+### Port Already in Use
+
+```bash
+# Find process using port
+lsof -i :3000  # Next.js
+lsof -i :8000  # Tracker
+lsof -i :6379  # Redis
+
+# Kill process
+kill -9 <PID>
+```

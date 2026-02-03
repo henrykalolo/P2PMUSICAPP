@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { verifyToken } from '@/lib/auth/jwt';
+import { notifyComment } from '@/lib/notifications/helper';
 
 // GET /api/social/comments?postId=xxx - Get comments for a post
 export async function GET(request: NextRequest) {
@@ -110,6 +111,18 @@ export async function POST(request: NextRequest) {
       'SELECT username, avatar_url FROM users WHERE id = $1',
       [userId]
     );
+
+    // Get post info for notification
+    const postResult = await query(
+      'SELECT title, author_id FROM posts WHERE id = $1',
+      [postId]
+    );
+    const post = postResult.rows[0];
+
+    // Send notification to post author (if not commenting on own post)
+    if (post.author_id && post.author_id !== userId) {
+      await notifyComment(postId, post.title, post.author_id, userResult.rows[0].username, content);
+    }
 
     const comment = {
       id: commentResult.rows[0].id,

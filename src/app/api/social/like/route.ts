@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { verifyToken } from '@/lib/auth/jwt';
+import { notifyLike } from '@/lib/notifications/helper';
 
 // POST /api/social/like - Like a post (with badge reward system)
 export async function POST(request: NextRequest) {
@@ -53,6 +54,25 @@ export async function POST(request: NextRequest) {
       'INSERT INTO likes (user_id, post_id) VALUES ($1, $2)',
       [userId, postId]
     );
+
+    // Get post and author info for notification
+    const postResult = await query(
+      'SELECT title, author_id FROM posts WHERE id = $1',
+      [postId]
+    );
+    const post = postResult.rows[0];
+
+    // Get liker info
+    const likerResult = await query(
+      'SELECT username FROM users WHERE id = $1',
+      [userId]
+    );
+    const liker = likerResult.rows[0];
+
+    // Send notification to post author (if not liking own post)
+    if (post.author_id && post.author_id !== userId) {
+      await notifyLike(postId, post.title, post.author_id, liker.username);
+    }
 
     // Get updated like count
     const likeCountResult = await query(

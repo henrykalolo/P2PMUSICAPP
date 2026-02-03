@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { P2PMusicPlayer } from '@/components/player/P2PMusicPlayer';
+import Link from 'next/link';
+import { UnifiedMusicPlayer } from '@/components/player/UnifiedMusicPlayer';
+import { StorageSystem } from '@/lib/storage/unifiedStorage';
 import { Button } from '@/components/ui/button';
 import {
   Heart,
@@ -18,6 +20,7 @@ import {
   Award,
   MoreHorizontal,
   Trash2,
+  Repeat
 } from 'lucide-react';
 import { usePlayerStore } from '@/store/usePlayerStore';
 
@@ -47,7 +50,9 @@ interface FeedItemProps {
     album: string;
     genre: string;
     duration: number;
-    magnetUri: string;
+    magnetUri?: string;
+    ipfsCid?: string;
+    storageType?: string;
     coverArtUrl?: string;
     createdAt: string;
     author: {
@@ -267,9 +272,14 @@ const CommentItem: React.FC<{
       )}
 
       {/* Content */}
-      <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="font-semibold text-sm">{comment.user.username}</span>
+          <Link 
+            href={`/user/${comment.user.id}`} 
+            className="font-semibold text-sm hover:text-primary transition-colors"
+          >
+            {comment.user.username}
+          </Link>
           <span className="text-xs text-muted-foreground">
             {formatRelativeTime(comment.createdAt)}
           </span>
@@ -313,6 +323,10 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [badgeNotification, setBadgeNotification] = useState<BadgeNotification | null>(null);
   const [isLiking, setIsLiking] = useState(false);
+  const [hasReposted, setHasReposted] = useState(false);
+  const [repostsCount, setRepostsCount] = useState(0);
+  const [showRepostModal, setShowRepostModal] = useState(false);
+  const [repostCaption, setRepostCaption] = useState('');
   
   // Refs
   const commentsRef = useRef<HTMLDivElement>(null);
@@ -343,9 +357,89 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
     }
   }, [post.id, showComments]);
 
+  // Fetch repost count
+  const fetchRepostCount = useCallback(async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const options: RequestInit = token ? { headers: { Authorization: `Bearer ${token}` } } : {};
+      const response = await fetch(`/api/social/repost?postId=${post.id}`, options);
+      if (response.ok) {
+        const data = await response.json();
+        setRepostsCount(data.repostsCount);
+        setHasReposted(data.userHasReposted);
+      }
+    } catch (error) {
+      console.error('Failed to fetch repost count:', error);
+    }
+  }, [post.id]);
+
   useEffect(() => {
     fetchComments();
-  }, [fetchComments]);
+    fetchRepostCount();
+  }, [fetchComments, fetchRepostCount]);
+
+  // Handle repost
+  const handleRepost = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      setToast({ message: 'Please sign in to repost', type: 'error' });
+      return;
+    }
+
+    try {
+      const response = await fetch('/api/social/repost', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          postId: post.id,
+          caption: repostCaption.trim() || null
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setRepostsCount(data.repostsCount);
+        setHasReposted(true);
+        setShowRepostModal(false);
+        setRepostCaption('');
+        setToast({ message: 'Reposted successfully!', type: 'success' });
+      } else {
+        const error = await response.json();
+        setToast({ message: error.error || 'Failed to repost', type: 'error' });
+      }
+    } catch (error) {
+      console.error('Repost error:', error);
+      setToast({ message: 'Failed to repost', type: 'error' });
+    }
+  };
+
+  // Handle remove repost
+  const handleRemoveRepost = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+
+    try {
+      const response = await fetch(`/api/social/repost?postId=${post.id}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setRepostsCount(data.repostsCount);
+        setHasReposted(false);
+        setToast({ message: 'Repost removed', type: 'success' });
+      }
+    } catch (error) {
+      console.error('Remove repost error:', error);
+      setToast({ message: 'Failed to remove repost', type: 'error' });
+    }
+  };
 
   // Handle like/unlike
   const handleLike = async () => {
@@ -504,7 +598,7 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
   };
 
   return (
-    <div className="bg-card border rounded-xl p-4 mb-4 shadow-sm hover:shadow-md transition-shadow">
+    <div className="bg-card border border-border/50 rounded-2xl p-6 mb-6 shadow-lg hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
       {/* Toast Notifications */}
       {toast && (
         <Toast
@@ -522,17 +616,69 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
         />
       )}
 
-      {/* Share Modal */}
+        {/* Share Modal */}
       <ShareModal
         isOpen={showShareModal}
         onClose={() => setShowShareModal(false)}
-        magnetUri={post.magnetUri}
+        magnetUri={post.magnetUri || ''}
         postId={post.id}
         title={post.title}
         onCopy={handleCopy}
       />
 
-      {/* Author Info */}
+        {/* Repost Modal */}
+      {showRepostModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-card rounded-2xl max-w-md w-full p-6 shadow-xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold">Repost Track</h3>
+              <button
+                onClick={() => setShowRepostModal(false)}
+                className="p-1 hover:bg-secondary rounded-full transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-foreground mb-2">
+                Add a comment (optional)
+              </label>
+              <textarea
+                value={repostCaption}
+                onChange={(e) => setRepostCaption(e.target.value)}
+                placeholder="What do you think about this track?"
+                className="w-full min-h-[100px] rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                maxLength={500}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                {repostCaption.length}/500 characters
+              </p>
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowRepostModal(false)}
+                className="flex-1"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={handleRepost}
+                className="flex-1 bg-green-600 hover:bg-green-700"
+              >
+                <Repeat className="h-4 w-4 mr-2" />
+                Repost
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+         {/* Author Info */}
       <div className="flex items-center gap-3 mb-4">
         {post.author.avatarUrl ? (
           <img
@@ -546,7 +692,12 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
           </div>
         )}
         <div className="flex-1">
-          <p className="font-semibold">{post.author.username}</p>
+          <Link 
+            href={`/user/${post.author.id}`} 
+            className="font-semibold hover:text-primary transition-colors"
+          >
+            {post.author.username}
+          </Link>
           <p className="text-xs text-muted-foreground">
             {new Date(post.createdAt).toLocaleDateString(undefined, {
               year: 'numeric',
@@ -590,12 +741,47 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
         </div>
       )}
 
-      {/* P2P Player */}
+      {/* P2P Player - Shows for all storage systems with fallback */}
       <div className="mb-4">
-        <P2PMusicPlayer magnetURI={post.magnetUri} />
+        {post.ipfsCid ? (
+          <UnifiedMusicPlayer 
+            trackId={post.ipfsCid} 
+            title={post.title}
+            artist={post.artist}
+            preferredStorage={StorageSystem.IPFS}
+          />
+        ) : post.magnetUri ? (
+          <UnifiedMusicPlayer 
+            trackId={post.magnetUri} 
+            title={post.title}
+            artist={post.artist}
+            preferredStorage={StorageSystem.WEB_TORRENT}
+          />
+        ) : post.storageType === 'local' || post.storageType === 'indexeddb' ? (
+          <UnifiedMusicPlayer 
+            trackId={`local-${post.id}`} 
+            title={post.title}
+            artist={post.artist}
+            preferredStorage={StorageSystem.INDEXED_DB}
+          />
+        ) : post.storageType === 'cache-api' ? (
+          <UnifiedMusicPlayer 
+            trackId={`cache-${post.id}`} 
+            title={post.title}
+            artist={post.artist}
+            preferredStorage={StorageSystem.CACHE_API}
+          />
+        ) : (
+          /* Fallback: try using track ID directly for any other storage type */
+          <UnifiedMusicPlayer 
+            trackId={post.id} 
+            title={post.title}
+            artist={post.artist}
+          />
+        )}
       </div>
 
-      {/* Social Actions */}
+         {/* Social Actions */}
       <div className="flex items-center gap-2 pt-4 border-t">
         <Button
           variant="ghost"
@@ -632,6 +818,32 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
         >
           <Share2 className="h-4 w-4 mr-2" />
           Share
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setShowRepostModal(true)}
+          className="hover:text-green-500 transition-colors"
+        >
+          <Repeat className="h-4 w-4 mr-2" />
+          Repost
+        </Button>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => hasReposted ? handleRemoveRepost() : setShowRepostModal(true)}
+          className={`transition-all ${
+            hasReposted ? 'text-green-500 hover:text-green-600' : 'hover:text-green-500'
+          }`}
+        >
+          <Repeat
+            className={`h-4 w-4 mr-2 transition-all ${
+              hasReposted ? 'fill-current' : ''
+            }`}
+          />
+          <span className="tabular-nums">{repostsCount}</span>
         </Button>
       </div>
 
