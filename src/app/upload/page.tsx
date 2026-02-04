@@ -59,10 +59,8 @@ export default function UploadPage() {
     storageResult: any;
   }) => {
     console.log('Upload complete:', metadata);
-    // Redirect to user's profile page to show their posts
-    if (user?.id) {
-      window.location.href = `/user/${user.id}`;
-    }
+    // Redirect to user posts feed
+    window.location.href = '/feed';
   };
 
   // Show loading state

@@ -261,6 +261,7 @@ export const UploadComponent: React.FC<UploadComponentProps> = ({
           ipfsCid: storageResult.ipfsCid || null,
           magnetUri: storageResult.magnetUri || null,
           storageSystem: storageResult.system,
+          serverStorageId: (storageResult as any).serverId || null,
           fileSize: selectedFile.size,
           mimeType: selectedFile.type,
           coverArtUrl: metadata.coverArtUrl || null,

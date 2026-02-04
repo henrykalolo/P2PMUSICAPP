@@ -53,6 +53,7 @@ interface FeedItemProps {
     magnetUri?: string;
     ipfsCid?: string;
     storageType?: string;
+    serverStorageId?: string;
     coverArtUrl?: string;
     createdAt: string;
     author: {
@@ -749,6 +750,7 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
             title={post.title}
             artist={post.artist}
             preferredStorage={StorageSystem.IPFS}
+            serverStorageId={post.serverStorageId}
           />
         ) : post.magnetUri ? (
           <UnifiedMusicPlayer 
@@ -756,6 +758,7 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
             title={post.title}
             artist={post.artist}
             preferredStorage={StorageSystem.WEB_TORRENT}
+            serverStorageId={post.serverStorageId}
           />
         ) : post.storageType === 'local' || post.storageType === 'indexeddb' ? (
           <UnifiedMusicPlayer 
@@ -763,6 +766,7 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
             title={post.title}
             artist={post.artist}
             preferredStorage={StorageSystem.INDEXED_DB}
+            serverStorageId={post.serverStorageId}
           />
         ) : post.storageType === 'cache-api' ? (
           <UnifiedMusicPlayer 
@@ -770,6 +774,7 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
             title={post.title}
             artist={post.artist}
             preferredStorage={StorageSystem.CACHE_API}
+            serverStorageId={post.serverStorageId}
           />
         ) : (
           /* Fallback: try using track ID directly for any other storage type */
@@ -777,6 +782,7 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
             trackId={post.id} 
             title={post.title}
             artist={post.artist}
+            serverStorageId={post.serverStorageId}
           />
         )}
       </div>

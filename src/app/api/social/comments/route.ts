@@ -22,13 +22,14 @@ export async function GET(request: NextRequest) {
         c.content,
         c.timestamp_seconds,
         c.created_at,
+        c.parent_id,
         u.id as user_id,
         u.username,
         u.avatar_url
       FROM comments c
       JOIN users u ON c.user_id = u.id
       WHERE c.post_id = $1
-      ORDER BY c.created_at DESC`,
+      ORDER BY c.created_at ASC`,
       [postId]
     );
 
@@ -37,6 +38,7 @@ export async function GET(request: NextRequest) {
       content: row.content,
       timestampSeconds: row.timestamp_seconds,
       createdAt: row.created_at,
+      parentId: row.parent_id,
       user: {
         id: row.user_id,
         username: row.username,
@@ -80,7 +82,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { postId, content, timestampSeconds } = await request.json();
+    const { postId, content, timestampSeconds, parentId } = await request.json();
 
     if (!postId || !content?.trim()) {
       return NextResponse.json(
@@ -96,14 +98,28 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Validate parentId if provided
+    if (parentId) {
+      const parentComment = await query(
+        'SELECT id FROM comments WHERE id = $1 AND post_id = $2',
+        [parentId, postId]
+      );
+      if (parentComment.rows.length === 0) {
+        return NextResponse.json(
+          { error: 'Parent comment not found' },
+          { status: 400 }
+        );
+      }
+    }
+
     const userId = payload.userId;
 
     // Insert comment
     const commentResult = await query(
-      `INSERT INTO comments (post_id, user_id, content, timestamp_seconds)
-       VALUES ($1, $2, $3, $4)
+      `INSERT INTO comments (post_id, user_id, content, timestamp_seconds, parent_id)
+       VALUES ($1, $2, $3, $4, $5)
        RETURNING id, created_at`,
-      [postId, userId, content.trim(), timestampSeconds || null]
+      [postId, userId, content.trim(), timestampSeconds || null, parentId || null]
     );
 
     // Get user info for response
@@ -128,6 +144,7 @@ export async function POST(request: NextRequest) {
       id: commentResult.rows[0].id,
       content: content.trim(),
       timestampSeconds: timestampSeconds || null,
+      parentId: parentId || null,
       createdAt: commentResult.rows[0].created_at,
       user: {
         id: userId,

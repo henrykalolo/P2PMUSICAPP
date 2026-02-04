@@ -1,8 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { verifyToken } from '@/lib/auth/jwt';
+import {
+  checkUserQuota,
+  getStorageStats,
+  storeOnServer,
+  storeOnP2P,
+  checkAndBalanceStorage,
+  type ServerStorageResult,
+  type P2PStorageResult,
+} from '@/lib/storage/unifiedStorage';
 
+// ============================================
 // GET /api/tracks - Get all tracks
+// ============================================
 export async function GET(request: NextRequest) {
   try {
     // Check if DATABASE_URL is configured
@@ -33,6 +44,7 @@ export async function GET(request: NextRequest) {
         p.ipfs_metadata_cid,
         p.ipfs_gateway_url,
         p.storage_type,
+        p.server_storage_id,
         p.cover_art_url,
         p.file_size,
         p.mime_type,
@@ -84,10 +96,12 @@ export async function GET(request: NextRequest) {
         ipfsMetadataCid: row.ipfs_metadata_cid,
         ipfsGatewayUrl: row.ipfs_gateway_url,
         storageType: row.storage_type,
+        serverStorageId: row.server_storage_id,
         coverArtUrl: row.cover_art_url,
         fileSize: row.file_size,
         mimeType: row.mime_type,
         createdAt: row.created_at,
+        instantReady: row.storage_type === 'server', // Server storage = instant rendering
         author: {
           id: row.author_id,
           username: row.author_username,
@@ -113,7 +127,10 @@ export async function GET(request: NextRequest) {
   }
 }
 
+// ============================================
 // POST /api/tracks - Create a new track
+// Uses unified storage with quota management
+// ============================================
 export async function POST(request: NextRequest) {
   try {
     // Get token from header
@@ -143,42 +160,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const body = await request.json();
-    const {
-      title,
-      artist,
-      album,
-      genre,
-      year,
-      duration,
-      ipfsCid,
-      metadataCid,
-      magnetUri,
-      storageSystem,
-      fileSize,
-      mimeType,
-      coverArtUrl,
-    } = body;
-
-     // Validate required fields
-     if (!title) {
-       return NextResponse.json(
-         { error: 'Title is required' },
-         { status: 400 }
-       );
-     }
-
-     // Validate IPFS CID format if provided (should be base58 or base32 encoded)
-     if (ipfsCid && (ipfsCid.length < 46 || ipfsCid.length > 128)) {
-       return NextResponse.json(
-         { error: 'Invalid IPFS CID format' },
-         { status: 400 }
-       );
-     }
-
     // Check if user can upload
     const userResult = await query(
-      'SELECT can_upload, daily_upload_quota, total_upload_quota FROM users WHERE id = $1',
+      'SELECT can_upload FROM users WHERE id = $1',
       [payload.userId]
     );
 
@@ -198,81 +182,179 @@ export async function POST(request: NextRequest) {
       );
     }
 
-     // Check for duplicate CID if provided
-     if (ipfsCid) {
-       const existingResult = await query(
-         'SELECT id FROM posts WHERE ipfs_cid = $1',
-         [ipfsCid]
-       );
+    // Parse multipart form data for file upload
+    const formData = await request.formData();
+    const file = formData.get('file') as File | null;
+    const title = formData.get('title') as string;
+    const artist = formData.get('artist') as string;
+    const album = formData.get('album') as string;
+    const genre = formData.get('genre') as string;
+    const year = formData.get('year') ? parseInt(formData.get('year') as string) : undefined;
+    const duration = formData.get('duration') ? parseInt(formData.get('duration') as string) : undefined;
+    const coverArtUrl = formData.get('coverArtUrl') as string;
+    
+    // Metadata-only mode (file already uploaded via /api/storage)
+    const metadataOnly = formData.get('metadataOnly') === 'true';
+    const serverStorageId = formData.get('serverStorageId') as string;
+    const ipfsCid = formData.get('ipfsCid') as string;
 
-       if (existingResult.rows.length > 0) {
-         return NextResponse.json(
-           { error: 'Track with this CID already exists' },
-           { status: 409 }
-         );
-       }
+    // Validate required fields
+    if (!title) {
+      return NextResponse.json(
+        { error: 'Title is required' },
+        { status: 400 }
+      );
     }
 
-      // Determine storage type
-      let storageType = 'ipfs';
-      if (storageSystem) {
-        if (storageSystem.toLowerCase().includes('webtorrent') || magnetUri) {
-          storageType = 'torrent';
-        } else if (storageSystem.toLowerCase().includes('local')) {
-          storageType = 'local';
-        }
-      } else if (magnetUri) {
-        storageType = 'torrent';
+    let storageType: 'server' | 'ipfs' | 'hybrid' = 'server';
+    let serverStorageIdResult: string | null = null;
+    let ipfsCidResult: string | null = null;
+    let ipfsGatewayUrl: string | null = null;
+    let fileSize = 0;
+    let mimeType = 'audio/mpeg';
+    let instantReady = true;
+
+    // If file is provided directly, upload using unified storage
+    if (file && !metadataOnly) {
+      // Check server storage and balance if needed before upload
+      if (file.size > 10 * 1024 * 1024) { // Only balance for files > 10MB
+        await checkAndBalanceStorage();
+      }
+      
+      mimeType = file.type;
+      fileSize = file.size;
+
+      // Check quota
+      const quotaCheck = await checkUserQuota(payload.userId, file.size);
+      
+      if (!quotaCheck.allowed) {
+        return NextResponse.json(
+          { error: 'Storage quota exceeded. Cannot upload file.' },
+          { status: 403 }
+        );
       }
 
-      // Insert track into database
-       const result = await query(
-        `INSERT INTO posts (
-          author_id,
-          title,
-          artist,
-          album,
-          genre,
-          year,
-          duration_seconds,
-          ipfs_cid,
-          ipfs_metadata_cid,
-          ipfs_gateway_url,
-          magnet_uri,
-          storage_type,
-          file_size,
-          mime_type,
-          cover_art_url
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-        RETURNING *`,
-        [
-          payload.userId,
-          title,
-          artist || 'Unknown Artist',
-          album || 'Unknown Album',
-          genre || '',
-          year || new Date().getFullYear(),
-          duration || 0,
-          ipfsCid || null,
-          metadataCid || null,
-          ipfsCid ? `https://ipfs.io/ipfs/${ipfsCid}` : null,
-          magnetUri || null,
-          storageType,
-          fileSize || 0,
-          mimeType || 'audio/mpeg',
-          coverArtUrl || null,
-        ]
+      // Use unified storage (server priority, P2P fallback)
+      if (quotaCheck.serverStorageAvailable) {
+        // Upload to server storage (instant rendering)
+        const serverResult = await storeOnServer(payload.userId, file, 'audio') as ServerStorageResult;
+        storageType = 'server';
+        serverStorageIdResult = serverResult.fileId;
+        instantReady = serverResult.instantReady;
+      } else if (quotaCheck.excessForP2P) {
+        // Upload to P2P storage (fallback for excess data)
+        const p2pResult = await storeOnP2P(file, { title, artist, album, genre, year, duration, uploadedBy: payload.userId }) as P2PStorageResult;
+        storageType = 'ipfs';
+        ipfsCidResult = p2pResult.cid;
+        ipfsGatewayUrl = p2pResult.gatewayUrl;
+        instantReady = p2pResult.instantReady;
+      } else {
+        return NextResponse.json(
+          { error: 'Storage quota exceeded' },
+          { status: 403 }
+        );
+      }
+    } else if (serverStorageId) {
+      // Using server storage with pre-uploaded file
+      storageType = 'server';
+      serverStorageIdResult = serverStorageId;
+      instantReady = true;
+    } else if (ipfsCid) {
+      // Using IPFS storage
+      storageType = 'ipfs';
+      ipfsCidResult = ipfsCid;
+      ipfsGatewayUrl = `https://ipfs.io/ipfs/${ipfsCid}`;
+      instantReady = false;
+    }
+
+    // Check for duplicate CID if provided
+    if (ipfsCidResult) {
+      const existingResult = await query(
+        'SELECT id FROM posts WHERE ipfs_cid = $1',
+        [ipfsCidResult]
       );
 
-    // Update user's upload quota tracking (simplified - in production, track actual usage)
+      if (existingResult.rows.length > 0) {
+        return NextResponse.json(
+          { error: 'Track with this CID already exists' },
+          { status: 409 }
+        );
+      }
+    }
+
+    // Insert track into database
+    const result = await query(
+      `INSERT INTO posts (
+        author_id,
+        title,
+        artist,
+        album,
+        genre,
+        year,
+        duration_seconds,
+        ipfs_cid,
+        ipfs_metadata_cid,
+        ipfs_gateway_url,
+        storage_type,
+        server_storage_id,
+        file_size,
+        mime_type,
+        cover_art_url
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+      RETURNING *`,
+      [
+        payload.userId,
+        title,
+        artist || 'Unknown Artist',
+        album || 'Unknown Album',
+        genre || '',
+        year || new Date().getFullYear(),
+        duration || 0,
+        ipfsCidResult,
+        null, // metadata CID
+        ipfsGatewayUrl,
+        storageType,
+        serverStorageIdResult,
+        fileSize,
+        mimeType,
+        coverArtUrl || null,
+      ]
+    );
+
+    // Update user's upload tracking
     await query(
       'UPDATE users SET updated_at = NOW() WHERE id = $1',
       [payload.userId]
     );
 
+    const track = result.rows[0];
+
     return NextResponse.json({
       success: true,
-      track: result.rows[0],
+      track: {
+        id: track.id,
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        genre: track.genre,
+        year: track.year,
+        duration: track.duration_seconds,
+        storageType: track.storage_type,
+        serverStorageId: track.server_storage_id,
+        ipfsCid: track.ipfs_cid,
+        ipfsGatewayUrl: track.ipfs_gateway_url,
+        fileSize: track.file_size,
+        mimeType: track.mime_type,
+        coverArtUrl: track.cover_art_url,
+        instantReady, // Track is instantly ready for server storage
+        createdAt: track.created_at,
+      },
+      storageInfo: {
+        storageType,
+        instantReady,
+        serverStorageId: serverStorageIdResult,
+        ipfsCid: ipfsCidResult,
+      },
     }, { status: 201 });
   } catch (error) {
     console.error('Create track error:', error);

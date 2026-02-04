@@ -19,6 +19,7 @@ interface Track {
   duration: number;
   magnetUri?: string;
   ipfsCid?: string;
+  serverStorageId?: string;
   coverArtUrl?: string;
   createdAt: string;
   author: {
@@ -90,11 +91,14 @@ export default function FeedPage() {
   const fetchFeedData = async () => {
     try {
       const token = localStorage.getItem('token');
-      const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
 
       const [tracksResponse, repostsResponse] = await Promise.all([
         fetch('/api/tracks'),
-        fetch('/api/social/reposts', { headers: authHeaders })
+        fetch('/api/social/reposts', { headers })
       ]);
 
       // Handle reposts separately - 401 is expected for unauthenticated users

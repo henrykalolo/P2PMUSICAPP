@@ -93,35 +93,48 @@ CREATE TRIGGER trigger_mutual_check
 AFTER INSERT ON follows
 FOR EACH ROW EXUTE FUNCTION update_mutual_status();
 
--- Music Posts (Torrents/IPFS)
-CREATE TABLE posts (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  author_id UUID REFERENCES users(id),
-  title TEXT NOT NULL,
-  artist TEXT,
-  album TEXT,
-  genre TEXT,
-  year INT,
-  duration_seconds INT,
-  bitrate INT,
-  -- P2P/WebTorrent fields (legacy support)
-  magnet_uri TEXT,
-  info_hash VARCHAR(40) UNIQUE,
-  -- IPFS fields
-  ipfs_cid VARCHAR(64),
-  ipfs_metadata_cid VARCHAR(64),
-  ipfs_gateway_url TEXT,
-  -- Storage type indicator
-  storage_type VARCHAR(10) DEFAULT 'ipfs' CHECK (storage_type IN ('ipfs', 'torrent', 'hybrid')),
-  cover_art_url TEXT,
-  file_size BIGINT,
-  mime_type TEXT,
-  created_at TIMESTAMP DEFAULT NOW()
-);
+ -- Music Posts (Torrents/IPFS/Server)
+ CREATE TABLE posts (
+   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+   author_id UUID REFERENCES users(id),
+   title TEXT NOT NULL,
+   artist TEXT,
+   album TEXT,
+   genre TEXT,
+   year INT,
+   duration_seconds INT,
+   bitrate INT,
+   -- P2P/WebTorrent fields (legacy support)
+   magnet_uri TEXT,
+   info_hash VARCHAR(40) UNIQUE,
+   -- IPFS fields
+   ipfs_cid VARCHAR(64),
+   ipfs_metadata_cid VARCHAR(64),
+   ipfs_gateway_url TEXT,
+   -- Server storage fields (primary storage for instant rendering)
+   server_storage_id VARCHAR(255),
+   -- Storage type indicator (now includes 'server')
+   storage_type VARCHAR(10) DEFAULT 'server' CHECK (storage_type IN ('ipfs', 'torrent', 'hybrid', 'server')),
+   -- Instant rendering flag (true for server storage)
+   instant_ready BOOLEAN DEFAULT TRUE,
+   cover_art_url TEXT,
+   file_size BIGINT,
+   mime_type TEXT,
+   created_at TIMESTAMP DEFAULT NOW()
+ );
 
--- Create index for IPFS CID lookups
-CREATE INDEX idx_posts_ipfs_cid ON posts(ipfs_cid) WHERE ipfs_cid IS NOT NULL;
-CREATE INDEX idx_posts_ipfs_metadata_cid ON posts(ipfs_metadata_cid) WHERE ipfs_metadata_cid IS NOT NULL;
+ -- Create indexes for IPFS CID lookups
+ CREATE INDEX idx_posts_ipfs_cid ON posts(ipfs_cid) WHERE ipfs_cid IS NOT NULL;
+ CREATE INDEX idx_posts_ipfs_metadata_cid ON posts(ipfs_metadata_cid) WHERE ipfs_metadata_cid IS NOT NULL;
+
+ -- Create index for server storage ID lookups
+ CREATE INDEX idx_posts_server_storage_id ON posts(server_storage_id) WHERE server_storage_id IS NOT NULL;
+
+ -- Create index for instant-ready tracks (server storage)
+ CREATE INDEX idx_posts_instant_ready ON posts(created_at DESC) WHERE storage_type = 'server';
+
+ -- Create index for author-based queries
+ CREATE INDEX idx_posts_author_storage ON posts(author_id, storage_type);
 
 -- Interactions
 CREATE TABLE likes (

@@ -38,14 +38,17 @@ export async function GET(request: NextRequest) {
     if (preferenceValues.length > 0) {
       const result = await query(
         `SELECT DISTINCT u.id, u.username, u.avatar_url, u.artist_bio,
+                u.is_artist, u.badge, u.trust_score,
                 COUNT(mp.preference_value) as matching_preferences
          FROM users u
          JOIN music_preferences mp ON u.id = mp.user_id
+         LEFT JOIN follows f ON f.following_id = u.id AND f.follower_id = $1
+         LEFT JOIN follows f2 ON f2.follower_id = u.id AND f2.following_id = $1
          WHERE u.id != $1
-           AND u.id NOT IN (SELECT following_id FROM follows WHERE follower_id = $1)
+           AND f.follower_id IS NULL
            AND mp.preference_value = ANY($2)
-         GROUP BY u.id, u.username, u.avatar_url, u.artist_bio
-         ORDER BY matching_preferences DESC
+         GROUP BY u.id, u.username, u.avatar_url, u.artist_bio, u.is_artist, u.badge, u.trust_score
+         ORDER BY matching_preferences DESC, u.created_at DESC
          LIMIT 20`,
         [userId, preferenceValues]
       );
@@ -53,10 +56,14 @@ export async function GET(request: NextRequest) {
     } else {
       // If no preferences, return most active users
       const result = await query(
-        `SELECT u.id, u.username, u.avatar_url, u.artist_bio, 0 as matching_preferences
+        `SELECT DISTINCT u.id, u.username, u.avatar_url, u.artist_bio,
+                u.is_artist, u.badge, u.trust_score,
+                0 as matching_preferences
          FROM users u
+         LEFT JOIN follows f ON f.following_id = u.id AND f.follower_id = $1
+         LEFT JOIN follows f2 ON f2.follower_id = u.id AND f2.following_id = $1
          WHERE u.id != $1
-           AND u.id NOT IN (SELECT following_id FROM follows WHERE follower_id = $1)
+           AND f.follower_id IS NULL
          ORDER BY u.created_at DESC
          LIMIT 20`,
         [userId]
@@ -64,7 +71,21 @@ export async function GET(request: NextRequest) {
       suggestions = result.rows;
     }
 
-    return NextResponse.json({ suggestions });
+    // Check mutual follow status
+    const suggestionsWithStatus = suggestions.map((user: any) => ({
+      id: user.id,
+      username: user.username,
+      avatarUrl: user.avatar_url,
+      bio: user.artist_bio,
+      isArtist: user.is_artist,
+      badge: user.badge,
+      trustScore: user.trust_score,
+      matchingPreferences: user.matching_preferences,
+      isFollowing: false,
+      isFollowedBy: false,
+    }));
+
+    return NextResponse.json({ suggestions: suggestionsWithStatus });
   } catch (error) {
     console.error('Get suggested users error:', error);
     return NextResponse.json(

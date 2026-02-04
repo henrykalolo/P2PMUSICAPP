@@ -4,8 +4,21 @@ import { useEffect, useState } from 'react';
 import { use } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Music, ArrowLeft, User, Clock, Star, Heart } from 'lucide-react';
+import { EnhancedFeedItem } from '@/components/feed/EnhancedFeedItem';
+import { RepostItem } from '@/components/feed/RepostItem';
 import { useAuthStore } from '@/store/useAuthStore';
+import { 
+  Music, 
+  ArrowLeft, 
+  User, 
+  Clock, 
+  Star, 
+  Heart,
+  Users,
+  Repeat,
+  Check,
+  UserPlus
+} from 'lucide-react';
 
 interface UserProfile {
   id: string;
@@ -17,6 +30,7 @@ interface UserProfile {
   followingCount: number;
   tracksCount: number;
   likesCount: number;
+  repostsCount: number;
   isArtist: boolean;
   badge: string;
   artistBio?: string;
@@ -24,6 +38,8 @@ interface UserProfile {
   artistVerified: boolean;
   role: string;
   createdAt: string;
+  isFollowing?: boolean;
+  isFollowedBy?: boolean;
 }
 
 interface UserTrack {
@@ -37,6 +53,12 @@ interface UserTrack {
   createdAt: string;
   likesCount: number;
   commentsCount: number;
+  repostsCount?: number;
+  author: {
+    id: string;
+    username: string;
+    avatarUrl?: string;
+  };
 }
 
 interface LikedTrack {
@@ -57,19 +79,70 @@ interface LikedTrack {
   };
 }
 
+interface FollowUser {
+  id: string;
+  username: string;
+  avatarUrl?: string;
+  trustScore: number;
+  isArtist: boolean;
+  isFollowing?: boolean;
+}
+
+interface Repost {
+  id: string;
+  userId: string;
+  postId: string;
+  caption: string | null;
+  createdAt: string;
+  reposter: {
+    id: string;
+    username: string;
+    avatarUrl?: string;
+    badge: string;
+  };
+  originalPost: {
+    id: string;
+    title: string;
+    artist: string;
+    album: string;
+    genre: string;
+    duration: number;
+    magnetUri?: string;
+    ipfsCid?: string;
+    coverArtUrl?: string;
+    createdAt: string;
+    likesCount: number;
+    commentsCount: number;
+    repostsCount: number;
+    author: {
+      id: string;
+      username: string;
+      avatarUrl?: string;
+      badge: string;
+    };
+  };
+}
+
+type TabType = 'tracks' | 'likes' | 'reposts' | 'followers' | 'following';
+
 export default function UserProfilePage({ params }: { params: Promise<{ userId: string }> }) {
   const unwrappedParams = use(params);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [tracks, setTracks] = useState<UserTrack[]>([]);
   const [likedTracks, setLikedTracks] = useState<LikedTrack[]>([]);
+  const [reposts, setReposts] = useState<Repost[]>([]);
+  const [followers, setFollowers] = useState<FollowUser[]>([]);
+  const [following, setFollowing] = useState<FollowUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('tracks');
+  const [activeTab, setActiveTab] = useState<TabType>('tracks');
   const [isFollowing, setIsFollowing] = useState(false);
+  const [isFollowedBy, setIsFollowedBy] = useState(false);
+  const [isProcessingFollow, setIsProcessingFollow] = useState(false);
   const { user } = useAuthStore();
 
   useEffect(() => {
     fetchProfileAndData();
-  }, []);
+  }, [unwrappedParams.userId]);
 
   const fetchProfileAndData = async () => {
     try {
@@ -79,7 +152,7 @@ export default function UserProfilePage({ params }: { params: Promise<{ userId: 
         headers['Authorization'] = `Bearer ${token}`;
       }
 
-      // Fetch user profile
+      // Fetch user profile with follow status
       const profileResponse = await fetch(`/api/social/profile/${unwrappedParams.userId}`, {
         headers
       });
@@ -92,6 +165,7 @@ export default function UserProfilePage({ params }: { params: Promise<{ userId: 
       const profileData = await profileResponse.json();
       setProfile(profileData.user);
       setIsFollowing(profileData.isFollowing);
+      setIsFollowedBy(profileData.isFollowedBy || false);
 
       // Fetch user's tracks
       const tracksResponse = await fetch('/api/tracks');
@@ -109,6 +183,33 @@ export default function UserProfilePage({ params }: { params: Promise<{ userId: 
         const likedData = await likedTracksResponse.json();
         setLikedTracks(likedData.tracks || []);
       }
+
+      // Fetch user's reposts
+      const repostsResponse = await fetch(`/api/social/reposts?userId=${unwrappedParams.userId}`, {
+        headers
+      });
+      if (repostsResponse.ok) {
+        const repostsData = await repostsResponse.json();
+        setReposts(repostsData.reposts || []);
+      }
+
+      // Fetch followers
+      const followersResponse = await fetch(`/api/social/followers/${unwrappedParams.userId}`, {
+        headers
+      });
+      if (followersResponse.ok) {
+        const followersData = await followersResponse.json();
+        setFollowers(followersData.users || []);
+      }
+
+      // Fetch following
+      const followingResponse = await fetch(`/api/social/following/${unwrappedParams.userId}`, {
+        headers
+      });
+      if (followingResponse.ok) {
+        const followingData = await followingResponse.json();
+        setFollowing(followingData.users || []);
+      }
     } catch (error) {
       console.error('Failed to fetch profile:', error);
     } finally {
@@ -117,8 +218,9 @@ export default function UserProfilePage({ params }: { params: Promise<{ userId: 
   };
 
   const handleFollow = async () => {
-    if (!user) return;
+    if (!user || isProcessingFollow) return;
 
+    setIsProcessingFollow(true);
     try {
       const token = localStorage.getItem('token');
       const response = await fetch('/api/social/follow', {
@@ -127,7 +229,7 @@ export default function UserProfilePage({ params }: { params: Promise<{ userId: 
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ followingId: unwrappedParams.userId }),
+        body: JSON.stringify({ userId: unwrappedParams.userId }),
       });
 
       if (response.ok) {
@@ -139,7 +241,15 @@ export default function UserProfilePage({ params }: { params: Promise<{ userId: 
       }
     } catch (error) {
       console.error('Follow error:', error);
+    } finally {
+      setIsProcessingFollow(false);
     }
+  };
+
+  const formatDuration = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   if (isLoading) {
@@ -166,21 +276,29 @@ export default function UserProfilePage({ params }: { params: Promise<{ userId: 
     );
   }
 
+  const tabs: { id: TabType; label: string; icon: any; count: number }[] = [
+    { id: 'tracks', label: 'Tracks', icon: Music, count: tracks.length },
+    { id: 'likes', label: 'Likes', icon: Heart, count: likedTracks.length },
+    { id: 'reposts', label: 'Reposts', icon: Repeat, count: reposts.length },
+    { id: 'followers', label: 'Followers', icon: Users, count: profile.followersCount },
+    { id: 'following', label: 'Following', icon: UserPlus, count: profile.followingCount },
+  ];
+
   return (
     <main className="min-h-screen bg-background">
       {/* Header */}
       <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container mx-auto px-4 h-14 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2 font-bold text-lg">
-            <Music className="h-5 w-5" />
-            P2P Music
-          </Link>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-4">
             <Link href="/feed">
               <Button variant="ghost" size="sm">
                 <ArrowLeft className="h-4 w-4 mr-2" />
-                Back to Feed
+                <span className="hidden sm:inline">Back</span>
               </Button>
+            </Link>
+            <Link href="/" className="flex items-center gap-2 font-bold text-lg">
+              <Music className="h-5 w-5" />
+              <span className="hidden xs:inline">P2P Music</span>
             </Link>
           </div>
         </div>
@@ -190,9 +308,9 @@ export default function UserProfilePage({ params }: { params: Promise<{ userId: 
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-4xl mx-auto">
           {/* Profile Header */}
-          <div className="bg-card border border-border/50 rounded-2xl p-8 mb-8 shadow-lg">
-            <div className="flex items-start gap-6">
-              <div className="w-24 h-24 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center flex-shrink-0">
+          <div className="bg-card border border-border/50 rounded-2xl p-6 mb-6 shadow-lg">
+            <div className="flex flex-col sm:flex-row items-start gap-6">
+              <div className="w-24 h-24 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center flex-shrink-0 mx-auto sm:mx-0">
                 {profile.avatarUrl ? (
                   <img
                     src={profile.avatarUrl}
@@ -203,29 +321,72 @@ export default function UserProfilePage({ params }: { params: Promise<{ userId: 
                   <User className="h-12 w-12 text-primary" />
                 )}
               </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-2">
-                  <h1 className="text-2xl font-bold">{profile.username}</h1>
-                  {profile.artistVerified && (
-                    <Star className="h-5 w-5 text-yellow-500" />
+              
+              <div className="flex-1 w-full">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-4">
+                  <div className="text-center sm:text-left">
+                    <div className="flex items-center gap-2 justify-center sm:justify-start">
+                      <h1 className="text-2xl font-bold">{profile.username}</h1>
+                      {profile.artistVerified && (
+                        <Star className="h-5 w-5 text-yellow-500" />
+                      )}
+                    </div>
+                    <p className="text-muted-foreground">{profile.email}</p>
+                  </div>
+
+                  {/* Follow Button */}
+                  {user?.id !== unwrappedParams.userId && (
+                    <div className="flex flex-col gap-2 sm:ml-auto">
+                      <Button 
+                        variant={isFollowing ? 'outline' : 'default'} 
+                        size="sm"
+                        onClick={handleFollow}
+                        disabled={isProcessingFollow}
+                        className={isFollowing ? '' : 'bg-primary hover:bg-primary/90'}
+                      >
+                        {isProcessingFollow ? (
+                          <div className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        ) : isFollowing ? (
+                          <>
+                            <Check className="h-4 w-4 mr-1" />
+                            Following
+                          </>
+                        ) : (
+                          <>
+                            <UserPlus className="h-4 w-4 mr-1" />
+                            Follow
+                          </>
+                        )}
+                      </Button>
+                      
+                      {/* Mutual follow indicator */}
+                      {isFollowedBy && isFollowing && (
+                        <p className="text-xs text-muted-foreground text-center">
+                          Follows you back
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
-                <p className="text-muted-foreground mb-4">{profile.email}</p>
-                <div className="flex items-center gap-6 mb-4">
-                  <div className="text-center">
-                    <p className="text-sm text-muted-foreground">Tracks</p>
+
+                {/* Stats */}
+                <div className="flex justify-center sm:justify-start gap-6 mb-4">
+                  <button onClick={() => setActiveTab('tracks')} className="text-center hover:text-primary transition-colors">
                     <p className="text-lg font-bold">{profile.tracksCount}</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-sm text-muted-foreground">Followers</p>
+                    <p className="text-xs text-muted-foreground">Tracks</p>
+                  </button>
+                  <button onClick={() => setActiveTab('followers')} className="text-center hover:text-primary transition-colors">
                     <p className="text-lg font-bold">{profile.followersCount}</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-sm text-muted-foreground">Following</p>
+                    <p className="text-xs text-muted-foreground">Followers</p>
+                  </button>
+                  <button onClick={() => setActiveTab('following')} className="text-center hover:text-primary transition-colors">
                     <p className="text-lg font-bold">{profile.followingCount}</p>
-                  </div>
+                    <p className="text-xs text-muted-foreground">Following</p>
+                  </button>
                 </div>
-                <div className="flex items-center gap-2">
+
+                {/* Badges */}
+                <div className="flex flex-wrap gap-2 justify-center sm:justify-start">
                   <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
                     profile.role === 'superadmin' ? 'bg-red-100 text-red-800' :
                     profile.role === 'admin' ? 'bg-blue-100 text-blue-800' :
@@ -236,50 +397,39 @@ export default function UserProfilePage({ params }: { params: Promise<{ userId: 
                   <span className="px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
                     {profile.badge}
                   </span>
+                  {profile.isArtist && (
+                    <span className="px-2 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
+                      Artist
+                    </span>
+                  )}
                 </div>
               </div>
-              {user?.id !== unwrappedParams.userId && (
-                <div className="flex flex-col gap-2">
-                  <Button 
-                    variant={isFollowing ? 'outline' : 'default'} 
-                    size="sm"
-                    onClick={handleFollow}
-                  >
-                    {isFollowing ? 'Unfollow' : 'Follow'}
-                  </Button>
-                </div>
-              )}
             </div>
 
             {/* Trust Score */}
-            <div className="mt-6 p-6 bg-muted rounded-lg">
-              <h2 className="text-lg font-semibold mb-2 flex items-center gap-2">
-                <Star className="h-5 w-5" />
-                Trust Score
-              </h2>
-              <div className="flex items-center gap-4">
-                <div className="flex-1">
-                  <div className="h-2 bg-secondary rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-primary transition-all duration-300"
-                      style={{ width: `${profile.trustScore}%` }}
-                    />
-                  </div>
-                </div>
-                <span className="text-lg font-bold">{profile.trustScore}</span>
+            <div className="mt-6 p-4 bg-muted rounded-lg">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="font-semibold flex items-center gap-2">
+                  <Star className="h-4 w-4" />
+                  Trust Score
+                </h3>
+                <span className="font-bold">{profile.trustScore}</span>
               </div>
-              <p className="text-sm text-muted-foreground mt-2">
-                Trust score increases by seeding content and maintaining good connections.
-              </p>
+              <div className="h-2 bg-secondary rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-primary transition-all duration-300"
+                  style={{ width: `${profile.trustScore}%` }}
+                />
+              </div>
             </div>
 
             {/* Artist Information */}
-            {profile.isArtist && (
-              <div className="mt-6">
-                <h3 className="font-semibold mb-2">About</h3>
-                <p className="text-muted-foreground mb-4">{profile.artistBio || 'No bio available'}</p>
+            {profile.isArtist && profile.artistBio && (
+              <div className="mt-4">
+                <h4 className="font-semibold mb-2">About</h4>
+                <p className="text-muted-foreground text-sm">{profile.artistBio}</p>
                 {profile.artistGenres && profile.artistGenres.length > 0 && (
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2 mt-2">
                     {profile.artistGenres.map((genre, index) => (
                       <span
                         key={index}
@@ -294,32 +444,30 @@ export default function UserProfilePage({ params }: { params: Promise<{ userId: 
             )}
 
             {/* Member Since */}
-            <div className="mt-6 flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
               <Clock className="h-4 w-4" />
               <span>Member since {new Date(profile.createdAt).toLocaleDateString()}</span>
             </div>
           </div>
 
           {/* Tabs */}
-          <div className="flex gap-4 mb-8 border-b">
-            <Button
-              variant={activeTab === 'tracks' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setActiveTab('tracks')}
-              className="rounded-t-lg rounded-b-none"
-            >
-              <Music className="h-4 w-4 mr-2" />
-              Tracks ({tracks.length})
-            </Button>
-            <Button
-              variant={activeTab === 'likes' ? 'default' : 'ghost'}
-              size="sm"
-              onClick={() => setActiveTab('likes')}
-              className="rounded-t-lg rounded-b-none"
-            >
-              <Heart className="h-4 w-4 mr-2" />
-              Likes ({likedTracks.length})
-            </Button>
+          <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
+            {tabs.map((tab) => {
+              const Icon = tab.icon;
+              return (
+                <Button
+                  key={tab.id}
+                  variant={activeTab === tab.id ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setActiveTab(tab.id)}
+                  className="flex items-center gap-2 whitespace-nowrap"
+                >
+                  <Icon className="h-4 w-4" />
+                  {tab.label}
+                  <span className="text-xs opacity-70">({tab.count})</span>
+                </Button>
+              );
+            })}
           </div>
 
           {/* Tab Content */}
@@ -328,36 +476,11 @@ export default function UserProfilePage({ params }: { params: Promise<{ userId: 
               <div>
                 <h3 className="font-semibold mb-4">{profile.username}'s Tracks</h3>
                 {tracks.length === 0 ? (
-                  <div className="text-center py-12">
-                    <Music className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                    <h4 className="text-lg font-semibold mb-2">No tracks uploaded yet</h4>
-                    <p className="text-muted-foreground">This user hasn't uploaded any tracks yet</p>
-                  </div>
+                  <EmptyState icon={Music} title="No tracks uploaded" message="This user hasn't uploaded any tracks yet" />
                 ) : (
                   <div className="space-y-4">
                     {tracks.map((track) => (
-                      <div key={track.id} className="flex items-center gap-4 p-4 rounded-lg bg-muted/30">
-                        {track.coverArtUrl ? (
-                          <img
-                            src={track.coverArtUrl}
-                            alt={track.title}
-                            className="w-16 h-16 rounded object-cover"
-                          />
-                        ) : (
-                          <div className="w-16 h-16 rounded bg-secondary flex items-center justify-center">
-                            <Music className="h-6 w-6 text-muted-foreground" />
-                          </div>
-                        )}
-                        <div className="flex-1">
-                          <h4 className="font-semibold">{track.title}</h4>
-                          <p className="text-muted-foreground text-sm">
-                            {track.artist} • {track.album} • {track.genre}
-                          </p>
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          {Math.floor(track.duration / 60)}:{(track.duration % 60).toString().padStart(2, '0')}
-                        </div>
-                      </div>
+                      <EnhancedFeedItem key={track.id} post={track} />
                     ))}
                   </div>
                 )}
@@ -368,39 +491,64 @@ export default function UserProfilePage({ params }: { params: Promise<{ userId: 
               <div>
                 <h3 className="font-semibold mb-4">{profile.username}'s Liked Tracks</h3>
                 {likedTracks.length === 0 ? (
-                  <div className="text-center py-12">
-                    <Heart className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-                    <h4 className="text-lg font-semibold mb-2">No liked tracks yet</h4>
-                    <p className="text-muted-foreground">This user hasn't liked any tracks yet</p>
-                  </div>
+                  <EmptyState icon={Heart} title="No liked tracks" message="This user hasn't liked any tracks yet" />
                 ) : (
                   <div className="space-y-4">
                     {likedTracks.map((track) => (
-                      <div key={track.id} className="flex items-center gap-4 p-4 rounded-lg bg-muted/30">
-                        {track.coverArtUrl ? (
-                          <img
-                            src={track.coverArtUrl}
-                            alt={track.title}
-                            className="w-16 h-16 rounded object-cover"
-                          />
-                        ) : (
-                          <div className="w-16 h-16 rounded bg-secondary flex items-center justify-center">
-                            <Music className="h-6 w-6 text-muted-foreground" />
-                          </div>
-                        )}
-                        <div className="flex-1">
-                          <h4 className="font-semibold">{track.title}</h4>
-                          <p className="text-muted-foreground text-sm">
-                            {track.artist} • {track.album} • {track.genre}
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            by {track.author.username}
-                          </p>
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          {Math.floor(track.duration / 60)}:{(track.duration % 60).toString().padStart(2, '0')}
-                        </div>
-                      </div>
+                      <EnhancedFeedItem key={track.id} post={track} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'reposts' && (
+              <div>
+                <h3 className="font-semibold mb-4">{profile.username}'s Reposts</h3>
+                {reposts.length === 0 ? (
+                  <EmptyState icon={Repeat} title="No reposts" message="This user hasn't reposted any tracks yet" />
+                ) : (
+                  <div className="space-y-4">
+                    {reposts.map((repost) => (
+                      <RepostItem key={repost.id} repost={repost} currentUserId={user?.id} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'followers' && (
+              <div>
+                <h3 className="font-semibold mb-4">{profile.username}'s Followers</h3>
+                {followers.length === 0 ? (
+                  <EmptyState icon={Users} title="No followers" message="This user doesn't have any followers yet" />
+                ) : (
+                  <div className="space-y-3">
+                    {followers.map((follower) => (
+                      <FollowerItem 
+                        key={follower.id} 
+                        user={follower} 
+                        currentUserId={user?.id}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'following' && (
+              <div>
+                <h3 className="font-semibold mb-4">{profile.username} is Following</h3>
+                {following.length === 0 ? (
+                  <EmptyState icon={UserPlus} title="Not following anyone" message="This user hasn't followed anyone yet" />
+                ) : (
+                  <div className="space-y-3">
+                    {following.map((followedUser) => (
+                      <FollowerItem 
+                        key={followedUser.id} 
+                        user={followedUser} 
+                        currentUserId={user?.id}
+                      />
                     ))}
                   </div>
                 )}
@@ -410,5 +558,102 @@ export default function UserProfilePage({ params }: { params: Promise<{ userId: 
         </div>
       </div>
     </main>
+  );
+}
+
+// Empty State Component
+function EmptyState({ icon: Icon, title, message }: { icon: any; title: string; message: string }) {
+  return (
+    <div className="text-center py-12">
+      <Icon className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+      <h4 className="text-lg font-semibold mb-2">{title}</h4>
+      <p className="text-muted-foreground">{message}</p>
+    </div>
+  );
+}
+
+// Follower/Following Item Component
+function FollowerItem({ user, currentUserId }: { user: FollowUser; currentUserId?: string }) {
+  const [isFollowing, setIsFollowing] = useState(user.isFollowing || false);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleFollow = async () => {
+    if (!currentUserId || isLoading) return;
+
+    setIsLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/social/follow', {
+        method: isFollowing ? 'DELETE' : 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ userId: user.id }),
+      });
+
+      if (response.ok) {
+        setIsFollowing(!isFollowing);
+      }
+    } catch (error) {
+      console.error('Follow error:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-4 p-4 rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
+      {user.avatarUrl ? (
+        <img
+          src={user.avatarUrl}
+          alt={user.username}
+          className="w-12 h-12 rounded-full object-cover"
+        />
+      ) : (
+        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
+          <User className="h-6 w-6 text-primary" />
+        </div>
+      )}
+      
+      <div className="flex-1 min-w-0">
+        <Link 
+          href={`/user/${user.id}`}
+          className="font-semibold hover:text-primary transition-colors"
+        >
+          {user.username}
+        </Link>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          {user.isArtist && (
+            <span className="px-2 py-0.5 bg-primary/10 text-primary rounded-full text-xs">
+              Artist
+            </span>
+          )}
+          <span>Trust: {user.trustScore}</span>
+        </div>
+      </div>
+
+      {currentUserId !== user.id && (
+        <Button
+          variant={isFollowing ? 'outline' : 'default'}
+          size="sm"
+          onClick={handleFollow}
+          disabled={isLoading}
+          className={isFollowing ? '' : 'bg-primary hover:bg-primary/90'}
+        >
+          {isFollowing ? (
+            <>
+              <Check className="h-4 w-4 mr-1" />
+              Following
+            </>
+          ) : (
+            <>
+              <UserPlus className="h-4 w-4 mr-1" />
+              Follow
+            </>
+          )}
+        </Button>
+      )}
+    </div>
   );
 }

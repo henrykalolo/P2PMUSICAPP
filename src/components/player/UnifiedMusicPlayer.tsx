@@ -17,6 +17,8 @@ interface UnifiedMusicPlayerProps {
   artist?: string;
   /** Preferred storage system (optional) */
   preferredStorage?: StorageSystem;
+  /** Server storage ID for fallback (used when IPFS isn't propagated yet) */
+  serverStorageId?: string;
 }
 
 export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
@@ -25,6 +27,7 @@ export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
   title = 'Unknown Track',
   artist = 'Unknown Artist',
   preferredStorage,
+  serverStorageId,
 }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const objectUrlRef = useRef<string | null>(null);
@@ -64,9 +67,19 @@ export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
 
         console.log(`Attempting to load track ${trackId} with options:`, storageOptions);
         
-        // First check if content is available in any storage system
+        // Determine the effective track ID to use (fallback to server storage if IPFS not available)
+        let effectiveTrackId = trackId;
+        let useServerFallback = false;
+        
+        // Check if content is available in IPFS/network storage
         const availability = await UnifiedStorage.isContentAvailable(trackId);
-        if (!availability.available) {
+        
+        // If not available and we have a server storage ID, use that instead
+        if (!availability.available && serverStorageId) {
+          console.log(`Track ${trackId} not available in P2P network, using server fallback: ${serverStorageId}`);
+          effectiveTrackId = serverStorageId;
+          useServerFallback = true;
+        } else if (!availability.available) {
           throw new Error('Track not available in any storage system');
         }
 
@@ -74,19 +87,24 @@ export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
 
         // Load the audio element with fallback mechanism
         const audio = await UnifiedStorage.streamAudio(
-          trackId,
+          effectiveTrackId,
           mimeType,
           storageOptions
         );
         
+        // Set the storage system that was used
+        setUsedStorage(useServerFallback ? StorageSystem.SERVER_FILE_SYSTEM : (preferredStorage || StorageSystem.IPFS));
+        
         // Determine which system was used
-        // In a real implementation, we could track this more precisely
-        if (trackId.startsWith('Qm')) {
+        // Check for various CID formats (v0:Qm..., v1:bafybe...) and other identifiers
+        if (trackId.startsWith('Qm') || trackId.startsWith('bafybe') || trackId.startsWith('bafkri') || trackId.startsWith('bafkr')) {
           setUsedStorage(StorageSystem.IPFS);
         } else if (trackId.startsWith('magnet:')) {
           setUsedStorage(StorageSystem.WEB_TORRENT);
         } else if (trackId.startsWith('file-')) {
           setUsedStorage(StorageSystem.INDEXED_DB);
+        } else if (useServerFallback) {
+          setUsedStorage(StorageSystem.SERVER_FILE_SYSTEM);
         }
 
         audio.preload = 'metadata';
@@ -119,7 +137,8 @@ export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
 
       } catch (err) {
         console.error('Player initialization error:', err);
-        setError(err instanceof Error ? err.message : 'Failed to initialize player');
+        const errorMessage = err instanceof Error ? err.message : 'Failed to initialize player';
+        setError(errorMessage);
         setIsLoading(false);
       }
     };
@@ -172,11 +191,21 @@ export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
 
   if (error) {
     return (
-      <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
-        <p className="text-red-600">Error: {error}</p>
-        <p className="text-sm text-red-500 mt-1">
+      <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+        <p className="text-amber-600 font-medium">{error}</p>
+        {error.includes('not available') && (
+          <p className="text-sm text-amber-500 mt-2">
+            This track may still be propagating on the P2P network. A server fallback is being used if available.
+          </p>
+        )}
+        <p className="text-xs text-muted-foreground mt-2 font-mono">
           Track ID: {trackId.slice(0, 20)}...
         </p>
+        {serverStorageId && (
+          <p className="text-xs text-muted-foreground mt-1 font-mono">
+            Server fallback: {serverStorageId.slice(0, 20)}...
+          </p>
+        )}
       </div>
     );
   }

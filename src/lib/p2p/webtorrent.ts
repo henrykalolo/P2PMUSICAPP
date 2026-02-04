@@ -3,7 +3,12 @@
  * Provides torrent creation, streaming, and seeding capabilities
  */
 
-import WebTorrent, { Torrent, TorrentFile } from 'webtorrent';
+// Import global shim FIRST - this must be before any webtorrent imports
+import './global-shim';
+
+// @ts-ignore - Global polyfill for browser environment
+import WebTorrent from 'webtorrent';
+import type { Torrent, TorrentFile } from 'webtorrent';
 
 // Singleton instance
 let client: InstanceType<typeof WebTorrent> | null = null;

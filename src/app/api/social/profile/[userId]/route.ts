@@ -44,21 +44,30 @@ export async function GET(
     const user = userResult.rows[0];
 
     // Fetch follower and following counts
-    const [followersResult, followingResult, tracksResult, likesResult] = await Promise.all([
+    const [followersResult, followingResult, tracksResult, likesResult, repostsResult] = await Promise.all([
       query('SELECT COUNT(*) as count FROM follows WHERE following_id = $1', [userId]),
       query('SELECT COUNT(*) as count FROM follows WHERE follower_id = $1', [userId]),
       query('SELECT COUNT(*) as count FROM posts WHERE author_id = $1', [userId]),
-      query('SELECT COUNT(*) as count FROM likes WHERE user_id = $1', [userId])
+      query('SELECT COUNT(*) as count FROM likes WHERE user_id = $1', [userId]),
+      query('SELECT COUNT(*) as count FROM reposts WHERE user_id = $1', [userId])
     ]);
 
-    // Check if current user is following this user
+    // Check if current user is following this user and if this user follows back
     let isFollowing = false;
+    let isFollowedBy = false;
     if (currentUserId && currentUserId !== userId) {
-      const followResult = await query(
-        'SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = $2',
-        [currentUserId, userId]
-      );
+      const [followResult, followedByResult] = await Promise.all([
+        query(
+          'SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = $2',
+          [currentUserId, userId]
+        ),
+        query(
+          'SELECT 1 FROM follows WHERE follower_id = $1 AND following_id = $2',
+          [userId, currentUserId]
+        )
+      ]);
       isFollowing = followResult.rows.length > 0;
+      isFollowedBy = followedByResult.rows.length > 0;
     }
 
     return NextResponse.json({
@@ -82,10 +91,12 @@ export async function GET(
         followingCount: parseInt(followingResult.rows[0].count),
         tracksCount: parseInt(tracksResult.rows[0].count),
         likesCount: parseInt(likesResult.rows[0].count),
+        repostsCount: parseInt(repostsResult.rows[0].count),
         createdAt: user.created_at,
         usersFollowedCount: user.users_followed_count
       },
-      isFollowing
+      isFollowing,
+      isFollowedBy
     });
   } catch (error) {
     console.error('Get user profile error:', error);

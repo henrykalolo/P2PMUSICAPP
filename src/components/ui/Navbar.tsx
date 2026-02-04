@@ -17,7 +17,9 @@ import {
   WifiOff,
   TrendingUp,
   Menu,
-  X
+  X,
+  ListMusic,
+  Heart
 } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useNotifications } from '@/context/NotificationContext';
@@ -74,6 +76,7 @@ export default function Navbar() {
     { href: '/feed', label: 'Feed', icon: Home },
     { href: '/discover', label: 'Discover', icon: Compass },
     { href: '/upload', label: 'Upload', icon: PlusSquare },
+    { href: '/playlists', label: 'Playlists', icon: ListMusic },
     { href: '/trending', label: 'Trending', icon: TrendingUp },
   ];
 
@@ -81,18 +84,18 @@ export default function Navbar() {
 
   return (
     <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-      <div className="container mx-auto px-4 h-14">
+      <div className="container mx-auto px-4 h-16">
         <div className="flex items-center justify-between h-full">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2 font-bold text-lg hover:opacity-80 transition-opacity">
+          <Link href="/" className="flex items-center gap-2 font-bold text-lg">
             <div className="p-1.5 rounded-lg bg-primary text-primary-foreground">
               <Music className="h-5 w-5" />
             </div>
-            <span className="hidden sm:inline">P2P Music</span>
+            <span className="hidden xs:inline">P2P Music</span>
           </Link>
 
-          {/* Desktop Navigation */}
-          <nav className="hidden md:flex items-center gap-1">
+          {/* Desktop Navigation - Hidden on mobile */}
+          <nav className="hidden lg:flex items-center gap-1">
             {navItems.map((item) => {
               const Icon = item.icon;
               return (
@@ -113,8 +116,8 @@ export default function Navbar() {
           </nav>
 
           {/* Right Section */}
-          <div className="flex items-center gap-2">
-            {/* Connection Status */}
+          <div className="flex items-center gap-1 sm:gap-2">
+            {/* Connection Status - Hidden on small screens */}
             <div 
               className={`hidden sm:flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium ${
                 isOnline 
@@ -156,7 +159,7 @@ export default function Navbar() {
                 </button>
 
                 {isUserMenuOpen && (
-                  <div className="absolute right-0 mt-2 w-56 bg-card border border-border rounded-xl shadow-lg overflow-hidden">
+                  <div className="absolute right-0 mt-2 w-56 bg-card border border-border rounded-xl shadow-lg overflow-hidden z-50">
                     {/* User Info */}
                     <div className="p-4 border-b border-border">
                       <p className="font-medium truncate">{user.username}</p>
@@ -178,6 +181,22 @@ export default function Navbar() {
                       >
                         <User className="h-4 w-4" />
                         <span>Profile</span>
+                      </Link>
+                      <Link
+                        href="/playlists"
+                        className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-accent transition-colors"
+                        onClick={() => setIsUserMenuOpen(false)}
+                      >
+                        <ListMusic className="h-4 w-4" />
+                        <span>Playlists</span>
+                      </Link>
+                      <Link
+                        href="/liked"
+                        className="flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-accent transition-colors"
+                        onClick={() => setIsUserMenuOpen(false)}
+                      >
+                        <Heart className="h-4 w-4" />
+                        <span>Liked</span>
                       </Link>
                       <Link
                         href="/profile/settings"
@@ -211,7 +230,7 @@ export default function Navbar() {
                 )}
               </div>
             ) : (
-              <div className="flex items-center gap-2">
+              <div className="hidden sm:flex items-center gap-2">
                 <Link href="/login">
                   <Button variant="ghost" size="sm">Sign In</Button>
                 </Link>
@@ -224,7 +243,8 @@ export default function Navbar() {
             {/* Mobile Menu Toggle */}
             <button
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="md:hidden p-2 rounded-lg hover:bg-accent transition-colors"
+              className="p-2 rounded-lg hover:bg-accent transition-colors"
+              aria-label="Toggle menu"
             >
               {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
             </button>
@@ -233,18 +253,17 @@ export default function Navbar() {
 
         {/* Search Bar (Expandable) */}
         {isSearchOpen && (
-          <div className="absolute top-full left-0 right-0 p-4 bg-background border-b shadow-lg">
+          <div className="absolute top-full left-0 right-0 p-4 bg-background border-b shadow-lg animate-in slide-in-from-top-2">
             <div className="container mx-auto">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <input
-                  type="text"
-                  placeholder="Search tracks, artists, users..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary"
-                  autoFocus
-                />
+                <Link
+                  href={`/discover?q=${encodeURIComponent(searchQuery)}`}
+                  className="w-full flex pl-10 pr-4 py-2 rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary"
+                  onClick={() => setIsSearchOpen(false)}
+                >
+                  Search tracks, artists, users...
+                </Link>
               </div>
             </div>
           </div>
@@ -252,7 +271,7 @@ export default function Navbar() {
 
         {/* Mobile Menu */}
         {isMobileMenuOpen && (
-          <div className="md:hidden absolute top-full left-0 right-0 bg-background border-b shadow-lg">
+          <div className="absolute top-full left-0 right-0 bg-background border-b shadow-lg lg:hidden animate-in slide-in-from-top-2">
             <nav className="container mx-auto px-4 py-4">
               <div className="flex flex-col gap-2">
                 {navItems.map((item) => {
@@ -273,6 +292,18 @@ export default function Navbar() {
                     </Link>
                   );
                 })}
+                
+                {/* Mobile Auth Links */}
+                {!user && (
+                  <div className="flex gap-2 mt-4 pt-4 border-t">
+                    <Link href="/login" className="flex-1" onClick={() => setIsMobileMenuOpen(false)}>
+                      <Button variant="outline" className="w-full">Sign In</Button>
+                    </Link>
+                    <Link href="/register" className="flex-1" onClick={() => setIsMobileMenuOpen(false)}>
+                      <Button className="w-full">Sign Up</Button>
+                    </Link>
+                  </div>
+                )}
               </div>
             </nav>
           </div>
