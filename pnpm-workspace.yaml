@@ -1,0 +1,9 @@
+allowBuilds:
+  '@ipshipyard/node-datachannel': true
+  bufferutil: true
+  esbuild: true
+  node-datachannel: true
+  sharp: true
+  unrs-resolver: true
+  utf-8-validate: true
+  utp-native: true
