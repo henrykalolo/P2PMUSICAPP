@@ -8,7 +8,7 @@
  * optional redirect handled by the API, never a client-side dependency.
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle, Loader2, Pause, Play, SkipBack, SkipForward, Volume2 } from 'lucide-react';
 import { usePlayerStore } from '@/store/usePlayerStore';
@@ -38,6 +38,143 @@ function formatTime(seconds: number): string {
   const secs = Math.floor(seconds % 60);
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
+
+interface WaveformProgressProps {
+  seed: string;
+  progress: number;
+  buffered: number;
+  currentTime: number;
+  duration: number;
+  disabled?: boolean;
+  onSeek: (percent: number) => void;
+}
+
+/** Stable, seed-based waveform that behaves like a WhatsApp voice-note scrubber. */
+const WaveformProgress: React.FC<WaveformProgressProps> = ({
+  seed,
+  progress,
+  buffered,
+  currentTime,
+  duration,
+  disabled = false,
+  onSeek,
+}) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const draggingRef = useRef(false);
+
+  const bars = useMemo(() => {
+    let hash = 2166136261;
+    for (let index = 0; index < seed.length; index += 1) {
+      hash = Math.imul(hash ^ seed.charCodeAt(index), 16777619);
+    }
+
+    const count = 36;
+    return Array.from({ length: count }, (_, index) => {
+      hash = Math.imul(hash ^ (hash >>> 15), 2246822519);
+      hash = Math.imul(hash ^ (hash >>> 13), 3266489917);
+      const noise = ((hash >>> 0) % 1000) / 1000;
+      const envelope = 0.45 + 0.55 * Math.sin((index / (count - 1)) * Math.PI);
+      return Math.max(0.2, Math.min(1, envelope * (0.35 + noise * 0.65)));
+    });
+  }, [seed]);
+
+  const seekFromClientX = (clientX: number) => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0) return;
+    const percent = ((clientX - rect.left) / rect.width) * 100;
+    onSeek(Math.max(0, Math.min(100, percent)));
+  };
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (disabled) return;
+    draggingRef.current = true;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    seekFromClientX(event.clientX);
+  };
+
+  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggingRef.current || disabled) return;
+    seekFromClientX(event.clientX);
+  };
+
+  const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    draggingRef.current = false;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (disabled) return;
+    const step = event.shiftKey ? 10 : 5;
+
+    if (event.key === 'ArrowRight' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      onSeek(Math.min(100, progress + step));
+    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') {
+      event.preventDefault();
+      onSeek(Math.max(0, progress - step));
+    } else if (event.key === 'Home') {
+      event.preventDefault();
+      onSeek(0);
+    } else if (event.key === 'End') {
+      event.preventDefault();
+      onSeek(100);
+    }
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      role="slider"
+      tabIndex={disabled ? -1 : 0}
+      aria-label="Seek"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={Math.round(progress)}
+      aria-valuetext={`${formatTime(currentTime)} of ${formatTime(duration)}`}
+      aria-disabled={disabled}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      onLostPointerCapture={() => {
+        draggingRef.current = false;
+      }}
+      onKeyDown={handleKeyDown}
+      className={`relative flex h-7 min-w-0 flex-1 touch-none items-center gap-[2px] rounded-md ${
+        disabled ? 'cursor-default opacity-60' : 'cursor-pointer'
+      }`}
+    >
+      {bars.map((height, index) => {
+        const barPosition = ((index + 0.5) / bars.length) * 100;
+        const isPlayed = barPosition <= progress;
+        const isBuffered = barPosition <= buffered;
+
+        return (
+          <span
+            key={index}
+            aria-hidden="true"
+            style={{ height: `${Math.round(height * 100)}%` }}
+            className={`min-w-[2px] flex-1 rounded-full transition-colors ${
+              isPlayed
+                ? 'bg-primary'
+                : isBuffered
+                  ? 'bg-primary/35'
+                  : 'bg-muted-foreground/25'
+            }`}
+          />
+        );
+      })}
+
+      <span
+        aria-hidden="true"
+        style={{ left: `${Math.max(2, Math.min(98, progress))}%` }}
+        className="pointer-events-none absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-primary bg-background shadow-sm"
+      />
+    </div>
+  );
+};
 
 export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
   trackId,
@@ -174,6 +311,7 @@ export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
   };
 
   const ready = status === 'ready';
+  const progress = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
 
   const audioElement = mediaUrl ? (
     <audio
@@ -219,34 +357,19 @@ export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
               {isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
             </Button>
 
-            <div className="min-w-0 flex-1">
-              <div className="relative h-1 w-full overflow-hidden rounded bg-secondary">
-                <div
-                  className="absolute inset-y-0 left-0 bg-muted-foreground/40"
-                  style={{ width: `${Math.min(100, buffered)}%` }}
-                />
-                <div
-                  className="absolute inset-y-0 left-0 bg-primary"
-                  style={{
-                    width: `${duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0}%`,
-                  }}
-                />
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                step={0.1}
-                value={duration > 0 ? (currentTime / duration) * 100 : 0}
-                onChange={(event) => handleSeek(Number(event.target.value))}
+            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-muted/30 px-2 py-1.5">
+              <WaveformProgress
+                seed={trackId}
+                progress={progress}
+                buffered={Math.min(100, buffered)}
+                currentTime={currentTime}
+                duration={duration}
                 disabled={!ready}
-                aria-label="Seek"
-                className="mt-0.5 h-3 w-full cursor-pointer disabled:cursor-not-allowed"
+                onSeek={handleSeek}
               />
-              <div className="flex justify-between text-[10px] text-muted-foreground">
-                <span>{formatTime(currentTime)}</span>
-                <span>{formatTime(duration)}</span>
-              </div>
+              <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                {formatTime(currentTime)} / {formatTime(duration)}
+              </span>
             </div>
 
             {status === 'loading' && (
@@ -281,32 +404,19 @@ export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
         </div>
       ) : (
         <>
-          <div className="relative h-1.5 w-full overflow-hidden rounded bg-secondary">
-            <div
-              className="absolute inset-y-0 left-0 bg-muted-foreground/40"
-              style={{ width: `${Math.min(100, buffered)}%` }}
+          <div className="flex items-center gap-3 rounded-xl bg-muted/30 px-3 py-2">
+            <WaveformProgress
+              seed={trackId}
+              progress={progress}
+              buffered={Math.min(100, buffered)}
+              currentTime={currentTime}
+              duration={duration}
+              disabled={!ready}
+              onSeek={handleSeek}
             />
-            <div
-              className="absolute inset-y-0 left-0 bg-primary"
-              style={{
-                width: `${duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0}%`,
-              }}
-            />
-          </div>
-          <input
-            type="range"
-            min={0}
-            max={100}
-            step={0.1}
-            value={duration > 0 ? (currentTime / duration) * 100 : 0}
-            onChange={(event) => handleSeek(Number(event.target.value))}
-            disabled={!ready}
-            aria-label="Seek"
-            className="mt-1 h-4 w-full cursor-pointer disabled:cursor-not-allowed"
-          />
-          <div className="flex justify-between text-[10px] text-muted-foreground">
-            <span>{formatTime(currentTime)}</span>
-            <span>{formatTime(duration)}</span>
+            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+              {formatTime(currentTime)} / {formatTime(duration)}
+            </span>
           </div>
         </>
       )}
