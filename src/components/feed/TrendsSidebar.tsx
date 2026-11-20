@@ -141,7 +141,7 @@ export function TrendsSidebar({ userId }: TrendsSidebarProps) {
           {trends.trendingArtists.map((artist) => (
             <Link
               key={artist.id}
-              href={`/profile/${artist.id}`}
+              href={`/user/${artist.id}`}
               className="flex items-center gap-3 p-2 rounded-lg hover:bg-accent/50 transition-colors"
             >
               <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">

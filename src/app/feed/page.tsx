@@ -5,8 +5,6 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { EnhancedFeedItem } from '@/components/feed/EnhancedFeedItem';
 import { RepostItem } from '@/components/feed/RepostItem';
-import { FollowingSidebar } from '@/components/feed/FollowingSidebar';
-import { TrendsSidebar } from '@/components/feed/TrendsSidebar';
 import { Music, Upload, User, LogOut, LogIn, UserPlus } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
 
@@ -169,63 +167,10 @@ export default function FeedPage() {
 
   return (
     <main className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="sticky top-0 z-50 w-full border-b border-border/50 bg-background/95 backdrop-blur-xl supports-[backdrop-filter]:bg-background/70">
-        <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2 font-bold text-xl">
-            <Music className="h-6 w-6 text-primary" />
-            P2P Music
-          </Link>
-          <div className="flex items-center gap-3">
-            {isAuthenticated ? (
-              <>
-                <Link href="/upload">
-                  <Button variant="ghost" size="sm" className="hover:bg-primary/10 transition-all duration-200">
-                    <Upload className="h-4 w-4 mr-2" />
-                    Upload
-                  </Button>
-                </Link>
-                <Link href="/profile">
-                  <Button variant="ghost" size="sm" className="hover:bg-primary/10 transition-all duration-200">
-                    <User className="h-4 w-4 mr-2" />
-                    Profile
-                  </Button>
-                </Link>
-                <Button variant="ghost" size="sm" onClick={handleLogout} className="hover:bg-destructive/10 hover:text-destructive transition-all duration-200">
-                  <LogOut className="h-4 w-4 mr-2" />
-                  Logout
-                </Button>
-              </>
-            ) : (
-              <>
-                <Link href="/login">
-                  <Button variant="ghost" size="sm" className="hover:bg-primary/10 transition-all duration-200">
-                    <LogIn className="h-4 w-4 mr-2" />
-                    Sign In
-                  </Button>
-                </Link>
-                <Link href="/register">
-                  <Button size="sm" className="bg-gradient-to-r from-primary to-accent hover:from-primary/90 hover:to-accent/90 transition-all duration-200">
-                    <UserPlus className="h-4 w-4 mr-2" />
-                    Sign Up
-                  </Button>
-                </Link>
-              </>
-            )}
-          </div>
-        </div>
-      </header>
 
       {/* Main Content */}
-      <div className="container mx-auto px-4 py-12">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          {/* Left Sidebar - Following */}
-          <div className="lg:col-span-3">
-            <FollowingSidebar userId={user?.id} />
-          </div>
-
-          {/* Feed Content */}
-          <div className="lg:col-span-6">
+      <div className="container mx-auto px-4 py-8">
+        <div className="mx-auto max-w-3xl space-y-8">
             {/* Account Details - Only for authenticated users */}
             {isAuthenticated && user && (
               <div className="mb-8 p-6 bg-card border border-border/50 rounded-2xl shadow-lg">
@@ -290,12 +235,6 @@ export default function FeedPage() {
                 ))}
               </div>
             )}
-          </div>
-
-          {/* Right Sidebar - Trends */}
-          <div className="lg:col-span-3">
-            <TrendsSidebar userId={user?.id} />
-          </div>
         </div>
       </div>
     </main>

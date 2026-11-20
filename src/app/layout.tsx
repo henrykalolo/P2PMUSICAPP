@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "@/styles/accessibility.css";
 import { ServiceWorkerProvider } from "@/components/providers/ServiceWorkerProvider";
+import AppShell from "@/components/layout/AppShell";
 
 export const metadata: Metadata = {
   title: "P2P Music Platform",
@@ -29,7 +30,7 @@ export default function RootLayout({
     <html lang="en">
       <body className="font-sans">
         <ServiceWorkerProvider>
-          {children}
+          <AppShell>{children}</AppShell>
         </ServiceWorkerProvider>
       </body>
     </html>

@@ -109,7 +109,7 @@ const Toast: React.FC<{
 
   return (
     <div
-      className={`fixed bottom-4 right-4 ${bgColors[type]} text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 animate-in slide-in-from-bottom-2 z-50`}
+      className={`fixed bottom-20 right-4 md:bottom-4 ${bgColors[type]} text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 animate-in slide-in-from-bottom-2 z-[80]`}
     >
       {type === 'success' && <Check className="h-4 w-4" />}
       <span className="text-sm font-medium">{message}</span>

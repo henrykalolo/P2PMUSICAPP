@@ -56,14 +56,6 @@ export default function UploadPage() {
   if (isLoading || !authChecked) {
     return (
       <main className="min-h-screen bg-background">
-        <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-          <div className="container mx-auto px-4 h-14 flex items-center justify-between">
-            <Link href="/" className="flex items-center gap-2 font-bold text-lg">
-              <Music className="h-5 w-5" />
-              P2P Music
-            </Link>
-          </div>
-        </header>
         <div className="container mx-auto px-4 py-8 flex items-center justify-center min-h-[60vh]">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
         </div>
@@ -75,22 +67,6 @@ export default function UploadPage() {
   if (!isAuthenticated) {
     return (
       <main className="min-h-screen bg-background">
-        {/* Header */}
-        <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-          <div className="container mx-auto px-4 h-14 flex items-center justify-between">
-            <Link href="/" className="flex items-center gap-2 font-bold text-lg">
-              <Music className="h-5 w-5" />
-              P2P Music
-            </Link>
-            <Link href="/feed">
-              <Button variant="ghost" size="sm">
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Back to Feed
-              </Button>
-            </Link>
-          </div>
-        </header>
-
         {/* Auth Required Content */}
         <div className="container mx-auto px-4 py-8">
           <div className="max-w-md mx-auto text-center">
@@ -136,22 +112,6 @@ export default function UploadPage() {
 
   return (
     <main className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container mx-auto px-4 h-14 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2 font-bold text-lg">
-            <Music className="h-5 w-5" />
-            P2P Music
-          </Link>
-          <Link href="/feed">
-            <Button variant="ghost" size="sm">
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Feed
-            </Button>
-          </Link>
-        </div>
-      </header>
-
       {/* Main Content */}
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-md mx-auto">

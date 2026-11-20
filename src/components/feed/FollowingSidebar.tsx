@@ -88,15 +88,17 @@ export function FollowingSidebar({ userId }: FollowingSidebarProps) {
           <div className="text-center py-8 text-muted-foreground">
             <User className="h-8 w-8 mx-auto mb-2" />
             <p className="text-sm">You're not following anyone yet</p>
-            <Button variant="ghost" size="sm" className="mt-2">
-              Find Artists
-            </Button>
+            <Link href="/discover">
+              <Button variant="ghost" size="sm" className="mt-2">
+                Find Artists
+              </Button>
+            </Link>
           </div>
         ) : (
           following.map((user) => (
             <Link
               key={user.id}
-              href={`/profile/${user.id}`}
+              href={`/user/${user.id}`}
               className="flex items-center gap-3 p-2 rounded-lg hover:bg-accent/50 transition-colors"
             >
               <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">

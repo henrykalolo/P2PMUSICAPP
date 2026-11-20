@@ -10,20 +10,6 @@ export const metadata = {
 export default function TechnicalPage() {
   return (
     <main className="min-h-screen bg-background">
-      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container mx-auto px-4 h-14 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2 font-bold text-lg">
-            <Music className="h-5 w-5" />
-            P2P Music
-          </Link>
-          <Link href="/docs">
-            <Button variant="ghost" size="sm">
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Docs
-            </Button>
-          </Link>
-        </div>
-      </header>
 
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-4xl mx-auto">

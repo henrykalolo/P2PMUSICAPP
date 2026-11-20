@@ -239,23 +239,6 @@ export default function PostPage({ params }: { params: Promise<{ postId: string 
 
   return (
     <main className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="container mx-auto px-4 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Link href="/feed">
-              <Button variant="ghost" size="sm">
-                <ArrowLeft className="h-4 w-4 mr-2" />
-                Back
-              </Button>
-            </Link>
-            <Link href="/" className="flex items-center gap-2 font-bold text-lg">
-              <Music className="h-5 w-5" />
-              <span className="hidden sm:inline">P2P Music</span>
-            </Link>
-          </div>
-        </div>
-      </header>
 
       {/* Main Content */}
       <div className="container mx-auto px-4 py-8">
