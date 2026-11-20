@@ -1,27 +1,24 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { UnifiedMusicPlayer } from '@/components/player/UnifiedMusicPlayer';
 import { Button } from '@/components/ui/button';
+import { useAuthStore } from '@/store/useAuthStore';
+import { usePlayerStore } from '@/store/usePlayerStore';
 import {
+  Check,
+  Clock,
   Heart,
   MessageCircle,
-  Share2,
-  User,
+  Repeat,
   Send,
-  Clock,
-  Check,
-  Link as LinkIcon,
-  X,
-  Award,
-  MoreHorizontal,
+  Share2,
   Trash2,
-  Repeat
+  User,
+  X,
 } from 'lucide-react';
-import { usePlayerStore } from '@/store/usePlayerStore';
 
-// Types
 interface Comment {
   id: string;
   content: string;
@@ -32,11 +29,6 @@ interface Comment {
     username: string;
     avatarUrl?: string;
   };
-}
-
-interface BadgeNotification {
-  badge: string;
-  message: string;
 }
 
 interface FeedItemProps {
@@ -65,13 +57,6 @@ interface FeedItemProps {
   currentUserId?: string;
 }
 
-// Utility functions
-const formatDuration = (seconds: number): string => {
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-};
-
 const formatTimestamp = (seconds: number): string => {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
@@ -80,227 +65,130 @@ const formatTimestamp = (seconds: number): string => {
 
 const formatRelativeTime = (dateString: string): string => {
   const date = new Date(dateString);
-  const now = new Date();
-  const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+  const diffInSeconds = Math.floor((Date.now() - date.getTime()) / 1000);
 
   if (diffInSeconds < 60) return 'just now';
-  if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;
-  if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`;
-  if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)}d ago`;
-  return date.toLocaleDateString();
+  if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m`;
+  if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h`;
+  if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)}d`;
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 };
 
-// Toast Notification Component
-const Toast: React.FC<{
-  message: string;
-  type: 'success' | 'error' | 'info';
-  onClose: () => void;
-}> = ({ message, type, onClose }) => {
+const Toast: React.FC<{ message: string; onClose: () => void }> = ({ message, onClose }) => {
   useEffect(() => {
-    const timer = setTimeout(onClose, 3000);
+    const timer = setTimeout(onClose, 2600);
     return () => clearTimeout(timer);
   }, [onClose]);
-
-  const bgColors = {
-    success: 'bg-green-500',
-    error: 'bg-red-500',
-    info: 'bg-blue-500',
-  };
 
   return (
     <div
-      className={`fixed bottom-20 right-4 md:bottom-4 ${bgColors[type]} text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-2 animate-in slide-in-from-bottom-2 z-[80]`}
+      role="status"
+      className="fixed bottom-20 left-1/2 z-[80] flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-card px-3 py-2 text-xs font-medium text-foreground shadow-lg md:bottom-6"
     >
-      {type === 'success' && <Check className="h-4 w-4" />}
-      <span className="text-sm font-medium">{message}</span>
-      <button onClick={onClose} className="ml-2 hover:opacity-70">
-        <X className="h-4 w-4" />
-      </button>
+      <Check className="h-3.5 w-3.5 text-primary" />
+      <span className="max-w-[70vw] truncate">{message}</span>
     </div>
   );
 };
 
-// Badge Notification Component
-const BadgeNotification: React.FC<{
-  badge: BadgeNotification;
-  onClose: () => void;
-}> = ({ badge, onClose }) => {
-  useEffect(() => {
-    const timer = setTimeout(onClose, 5000);
-    return () => clearTimeout(timer);
-  }, [onClose]);
+interface ActionButtonProps {
+  label: string;
+  count?: number;
+  active?: boolean;
+  activeClassName?: string;
+  onClick: () => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+}
 
-  return (
-    <div className="fixed top-4 right-4 bg-gradient-to-r from-purple-500 to-pink-500 text-white px-6 py-4 rounded-xl shadow-2xl animate-in slide-in-from-right z-50 max-w-sm">
-      <div className="flex items-start gap-3">
-        <div className="bg-white/20 p-2 rounded-full">
-          <Award className="h-6 w-6" />
-        </div>
-        <div className="flex-1">
-          <h4 className="font-bold text-lg">Achievement Unlocked!</h4>
-          <p className="text-white/90 text-sm mt-1">{badge.message}</p>
-          <div className="mt-2 inline-flex items-center gap-1 bg-white/20 px-3 py-1 rounded-full text-xs font-semibold">
-            <Award className="h-3 w-3" />
-            {badge.badge}
-          </div>
-        </div>
-        <button onClick={onClose} className="hover:opacity-70">
-          <X className="h-5 w-5" />
-        </button>
-      </div>
-    </div>
-  );
-};
+const ActionButton: React.FC<ActionButtonProps> = ({
+  label,
+  count,
+  active,
+  activeClassName,
+  onClick,
+  disabled,
+  children,
+}) => (
+  <button
+    type="button"
+    onClick={onClick}
+    disabled={disabled}
+    aria-label={count === undefined ? label : `${label}: ${count}`}
+    aria-pressed={active}
+    title={label}
+    className={`inline-flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50 ${
+      active ? activeClassName : ''
+    }`}
+  >
+    {children}
+    {count !== undefined && <span className="tabular-nums">{count}</span>}
+  </button>
+);
 
-// Share Modal Component
-const ShareModal: React.FC<{
-  isOpen: boolean;
-  onClose: () => void;
-  postId: string;
-  title: string;
-  onCopy: (text: string, label: string) => void;
-}> = ({ isOpen, onClose, postId, title, onCopy }) => {
-  if (!isOpen) return null;
-
-  const shareableUrl = `${window.location.origin}/post/${postId}`;
-
-  const shareOptions = [
-    {
-      label: 'Copy Track URL',
-      icon: LinkIcon,
-      action: () => onCopy(shareableUrl, 'Track URL copied!'),
-      description: 'Share on social media',
-    },
-  ];
-
-  const handleNativeShare = async () => {
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: `Check out "${title}" on P2PMusic`,
-          text: `Listen to "${title}" on P2PMusic`,
-          url: shareableUrl,
-        });
-      } catch (err) {
-        // User cancelled or share failed
-      }
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-card border rounded-xl shadow-2xl max-w-md w-full animate-in zoom-in-95">
-        <div className="flex items-center justify-between p-4 border-b">
-          <h3 className="font-semibold text-lg">Share Track</h3>
-          <button
-            onClick={onClose}
-            className="p-1 hover:bg-secondary rounded-full transition-colors"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        <div className="p-4 space-y-3">
-          {shareOptions.map((option) => (
-            <button
-              key={option.label}
-              onClick={option.action}
-              className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-secondary transition-colors text-left"
-            >
-              <div className="p-2 bg-primary/10 rounded-lg">
-                <option.icon className="h-5 w-5 text-primary" />
-              </div>
-              <div className="flex-1">
-                <p className="font-medium">{option.label}</p>
-                <p className="text-xs text-muted-foreground">{option.description}</p>
-              </div>
-            </button>
-          ))}
-
-          {'share' in navigator && (
-            <button
-              onClick={handleNativeShare}
-              className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-secondary transition-colors text-left border-t mt-2 pt-4"
-            >
-              <div className="p-2 bg-green-500/10 rounded-lg">
-                <Share2 className="h-5 w-5 text-green-500" />
-              </div>
-              <div className="flex-1">
-                <p className="font-medium">Share via...</p>
-                <p className="text-xs text-muted-foreground">Use native share dialog</p>
-              </div>
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Comment Item Component
 const CommentItem: React.FC<{
   comment: Comment;
   currentUserId?: string;
-  onDelete?: (commentId: string) => void;
-  trackDuration?: number;
-}> = ({ comment, currentUserId, onDelete, trackDuration }) => {
+  onDelete: (commentId: string) => void;
+}> = ({ comment, currentUserId, onDelete }) => {
   const isOwner = currentUserId === comment.user.id;
   const hasTimestamp = comment.timestampSeconds !== null && comment.timestampSeconds >= 0;
 
   return (
-    <div className="flex gap-3 p-3 rounded-lg hover:bg-secondary/50 transition-colors group">
-      {/* Avatar */}
+    <div className="group flex gap-2 rounded-md px-1 py-2 hover:bg-muted/40">
       {comment.user.avatarUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
         <img
           src={comment.user.avatarUrl}
           alt={comment.user.username}
-          className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+          className="h-7 w-7 shrink-0 rounded-full object-cover"
         />
       ) : (
-        <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center flex-shrink-0">
-          <User className="h-4 w-4 text-muted-foreground" />
-        </div>
+        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
+          <User className="h-3.5 w-3.5 text-muted-foreground" />
+        </span>
       )}
 
-      {/* Content */}
-        <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <Link 
-            href={`/user/${comment.user.id}`} 
-            className="font-semibold text-sm hover:text-primary transition-colors"
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-1.5">
+          <Link
+            href={`/user/${comment.user.id}`}
+            className="truncate text-xs font-medium hover:text-primary"
           >
             {comment.user.username}
           </Link>
-          <span className="text-xs text-muted-foreground">
+          <span className="shrink-0 text-[11px] text-muted-foreground">
             {formatRelativeTime(comment.createdAt)}
           </span>
           {hasTimestamp && (
-            <span className="inline-flex items-center gap-1 text-xs text-primary bg-primary/10 px-2 py-0.5 rounded-full">
-              <Clock className="h-3 w-3" />
+            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
+              <Clock className="h-2.5 w-2.5" />
               {formatTimestamp(comment.timestampSeconds!)}
             </span>
           )}
         </div>
-        <p className="text-sm mt-1 break-words">{comment.content}</p>
+        <p className="break-words text-sm">{comment.content}</p>
       </div>
 
-      {/* Actions */}
-      {isOwner && onDelete && (
+      {isOwner && (
         <button
+          type="button"
           onClick={() => onDelete(comment.id)}
-          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-100 hover:text-red-500 rounded transition-all"
+          aria-label="Delete comment"
           title="Delete comment"
+          className="h-7 w-7 shrink-0 rounded-md text-muted-foreground opacity-60 transition-colors hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
         >
-          <Trash2 className="h-4 w-4" />
+          <Trash2 className="mx-auto h-3.5 w-3.5" />
         </button>
       )}
     </div>
   );
 };
 
-// Main Enhanced FeedItem Component
 export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId }) => {
-  // State
+  const { user } = useAuthStore();
+  const viewerId = currentUserId ?? user?.id;
+
   const [hasLiked, setHasLiked] = useState(post.userHasLiked || false);
   const [likesCount, setLikesCount] = useState(post.likesCount);
   const [showComments, setShowComments] = useState(false);
@@ -310,40 +198,32 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
   const [commentText, setCommentText] = useState('');
   const [commentTimestamp, setCommentTimestamp] = useState<number | null>(null);
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
-  const [showShareModal, setShowShareModal] = useState(false);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
-  const [badgeNotification, setBadgeNotification] = useState<BadgeNotification | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const [isLiking, setIsLiking] = useState(false);
   const [hasReposted, setHasReposted] = useState(false);
   const [repostsCount, setRepostsCount] = useState(0);
   const [showRepostModal, setShowRepostModal] = useState(false);
   const [repostCaption, setRepostCaption] = useState('');
-  
-  // Refs
-  const commentsRef = useRef<HTMLDivElement>(null);
-  const commentInputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Fetch comments when comments section is opened
+  const notify = useCallback((message: string) => setToast(message), []);
+
   const fetchComments = useCallback(async () => {
     if (!showComments) return;
-    
+
     setIsLoadingComments(true);
     try {
       const response = await fetch(`/api/social/comments?postId=${post.id}`);
-      if (response.ok) {
-        const data = await response.json();
-        setComments(data.comments || []);
-        setCommentsCount(data.count || 0);
-      }
-    } catch (error) {
-      console.error('Failed to fetch comments:', error);
-      setToast({ message: 'Failed to load comments', type: 'error' });
+      if (!response.ok) throw new Error('Failed to load comments');
+      const data = await response.json();
+      setComments(data.comments || []);
+      setCommentsCount(data.count ?? data.comments?.length ?? 0);
+    } catch {
+      notify('Failed to load comments');
     } finally {
       setIsLoadingComments(false);
     }
-  }, [post.id, showComments]);
+  }, [notify, post.id, showComments]);
 
-  // Fetch repost count
   const fetchRepostCount = useCallback(async () => {
     try {
       const token = localStorage.getItem('token');
@@ -351,24 +231,23 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
       const response = await fetch(`/api/social/repost?postId=${post.id}`, options);
       if (response.ok) {
         const data = await response.json();
-        setRepostsCount(data.repostsCount);
-        setHasReposted(data.userHasReposted);
+        setRepostsCount(data.repostsCount ?? 0);
+        setHasReposted(Boolean(data.userHasReposted));
       }
-    } catch (error) {
-      console.error('Failed to fetch repost count:', error);
+    } catch {
+      // Repost counts are non-critical; the rest of the card still works.
     }
   }, [post.id]);
 
   useEffect(() => {
-    fetchComments();
-    fetchRepostCount();
+    void fetchComments();
+    void fetchRepostCount();
   }, [fetchComments, fetchRepostCount]);
 
-  // Handle repost
   const handleRepost = async () => {
     const token = localStorage.getItem('token');
     if (!token) {
-      setToast({ message: 'Please sign in to repost', type: 'error' });
+      notify('Sign in to repost');
       return;
     }
 
@@ -381,28 +260,23 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
         },
         body: JSON.stringify({
           postId: post.id,
-          caption: repostCaption.trim() || null
+          caption: repostCaption.trim() || null,
         }),
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        setRepostsCount(data.repostsCount);
-        setHasReposted(true);
-        setShowRepostModal(false);
-        setRepostCaption('');
-        setToast({ message: 'Reposted successfully!', type: 'success' });
-      } else {
-        const error = await response.json();
-        setToast({ message: error.error || 'Failed to repost', type: 'error' });
-      }
-    } catch (error) {
-      console.error('Repost error:', error);
-      setToast({ message: 'Failed to repost', type: 'error' });
+      if (!response.ok) throw new Error('Failed to repost');
+
+      const data = await response.json();
+      setRepostsCount(data.repostsCount ?? repostsCount + 1);
+      setHasReposted(true);
+      setShowRepostModal(false);
+      setRepostCaption('');
+      notify('Reposted');
+    } catch {
+      notify('Failed to repost');
     }
   };
 
-  // Handle remove repost
   const handleRemoveRepost = async () => {
     const token = localStorage.getItem('token');
     if (!token) return;
@@ -410,51 +284,40 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
     try {
       const response = await fetch(`/api/social/repost?postId=${post.id}`, {
         method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
       });
+      if (!response.ok) throw new Error('Failed to remove repost');
 
-      if (response.ok) {
-        const data = await response.json();
-        setRepostsCount(data.repostsCount);
-        setHasReposted(false);
-        setToast({ message: 'Repost removed', type: 'success' });
-      }
-    } catch (error) {
-      console.error('Remove repost error:', error);
-      setToast({ message: 'Failed to remove repost', type: 'error' });
+      const data = await response.json();
+      setRepostsCount(data.repostsCount ?? Math.max(0, repostsCount - 1));
+      setHasReposted(false);
+      setShowRepostModal(false);
+      notify('Repost removed');
+    } catch {
+      notify('Failed to remove repost');
     }
   };
 
-  // Handle like/unlike
   const handleLike = async () => {
     if (isLiking) return;
-    
+
     const token = localStorage.getItem('token');
     if (!token) {
-      setToast({ message: 'Please sign in to like tracks', type: 'error' });
+      notify('Sign in to like tracks');
       return;
     }
 
     setIsLiking(true);
-    
     try {
       if (hasLiked) {
-        // Unlike
         const response = await fetch(`/api/social/like?postId=${post.id}`, {
           method: 'DELETE',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+          headers: { Authorization: `Bearer ${token}` },
         });
-
-        if (response.ok) {
-          setHasLiked(false);
-          setLikesCount((prev) => Math.max(0, prev - 1));
-        }
+        if (!response.ok) throw new Error('Failed to unlike');
+        setHasLiked(false);
+        setLikesCount((prev) => Math.max(0, prev - 1));
       } else {
-        // Like
         const response = await fetch('/api/social/like', {
           method: 'POST',
           headers: {
@@ -463,41 +326,32 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
           },
           body: JSON.stringify({ postId: post.id }),
         });
+        if (!response.ok) throw new Error('Failed to like');
 
-        if (response.ok) {
-          const data = await response.json();
-          setHasLiked(true);
-          setLikesCount(data.likesCount || likesCount + 1);
-          
-          // Show badge notification if earned
-          if (data.awardedBadge && data.badgeMessage) {
-            setBadgeNotification({
-              badge: data.awardedBadge,
-              message: data.badgeMessage,
-            });
-          }
+        const data = await response.json();
+        setHasLiked(true);
+        setLikesCount(data.likesCount ?? likesCount + 1);
+        if (data.awardedBadge && data.badgeMessage) {
+          notify(`${data.awardedBadge}: ${data.badgeMessage}`);
         }
       }
-    } catch (error) {
-      console.error('Like error:', error);
-      setToast({ message: 'Failed to update like', type: 'error' });
+    } catch {
+      notify('Failed to update like');
     } finally {
       setIsLiking(false);
     }
   };
 
-  // Handle comment submission
   const handleSubmitComment = async () => {
     if (!commentText.trim()) return;
-    
+
     const token = localStorage.getItem('token');
     if (!token) {
-      setToast({ message: 'Please sign in to comment', type: 'error' });
+      notify('Sign in to comment');
       return;
     }
 
     setIsSubmittingComment(true);
-    
     try {
       const response = await fetch('/api/social/comments', {
         method: 'POST',
@@ -511,27 +365,21 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
           timestampSeconds: commentTimestamp,
         }),
       });
+      if (!response.ok) throw new Error('Failed to post comment');
 
-      if (response.ok) {
-        const data = await response.json();
-        setComments((prev) => [data.comment, ...prev]);
-        setCommentsCount(data.commentsCount);
-        setCommentText('');
-        setCommentTimestamp(null);
-        setToast({ message: 'Comment posted!', type: 'success' });
-      } else {
-        const error = await response.json();
-        setToast({ message: error.error || 'Failed to post comment', type: 'error' });
-      }
-    } catch (error) {
-      console.error('Comment error:', error);
-      setToast({ message: 'Failed to post comment', type: 'error' });
+      const data = await response.json();
+      setComments((prev) => [data.comment, ...prev]);
+      setCommentsCount(data.commentsCount ?? commentsCount + 1);
+      setCommentText('');
+      setCommentTimestamp(null);
+      notify('Comment added');
+    } catch {
+      notify('Failed to post comment');
     } finally {
       setIsSubmittingComment(false);
     }
   };
 
-  // Handle comment deletion
   const handleDeleteComment = async (commentId: string) => {
     const token = localStorage.getItem('token');
     if (!token) return;
@@ -539,188 +387,153 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
     try {
       const response = await fetch(`/api/social/comments?id=${commentId}`, {
         method: 'DELETE',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
       });
+      if (!response.ok) throw new Error('Failed to delete comment');
 
-      if (response.ok) {
-        setComments((prev) => prev.filter((c) => c.id !== commentId));
-        setCommentsCount((prev) => Math.max(0, prev - 1));
-        setToast({ message: 'Comment deleted', type: 'success' });
-      }
-    } catch (error) {
-      console.error('Delete comment error:', error);
-      setToast({ message: 'Failed to delete comment', type: 'error' });
+      setComments((prev) => prev.filter((comment) => comment.id !== commentId));
+      setCommentsCount((prev) => Math.max(0, prev - 1));
+      notify('Comment removed');
+    } catch {
+      notify('Failed to delete comment');
     }
   };
 
-  // Handle copy to clipboard
-  const handleCopy = async (text: string, successMessage: string) => {
+  const handleShare = async () => {
+    const url = `${window.location.origin}/post/${post.id}`;
+
     try {
-      await navigator.clipboard.writeText(text);
-      setToast({ message: successMessage, type: 'success' });
-      setShowShareModal(false);
-    } catch (err) {
-      setToast({ message: 'Failed to copy to clipboard', type: 'error' });
+      if (typeof navigator.share === 'function') {
+        await navigator.share({ title: post.title, url });
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+      notify('Link copied');
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      notify('Could not share link');
     }
   };
 
-  // Handle key press in comment input
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmitComment();
-    }
-  };
-
-  // Set timestamp from current playback position
   const setTimestampFromPlayback = () => {
-    const { currentTrack, progress } = usePlayerStore.getState();
+    const { currentTrack, progress: playerProgress } = usePlayerStore.getState();
     if (currentTrack?.id === post.id && post.duration > 0) {
-      const currentSeconds = Math.floor((progress / 100) * post.duration);
-      setCommentTimestamp(currentSeconds);
+      setCommentTimestamp(Math.floor((playerProgress / 100) * post.duration));
     }
   };
+
+  const metadata = [post.artist, post.album, post.genre].filter(Boolean).join(' · ');
 
   return (
-    <div className="bg-card border border-border/50 rounded-2xl p-6 mb-6 shadow-lg hover:shadow-2xl transition-all duration-300 hover:-translate-y-1">
-      {/* Toast Notifications */}
-      {toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          onClose={() => setToast(null)}
-        />
-      )}
+    <article className="rounded-xl border border-border/60 bg-card p-4">
+      {toast && <Toast message={toast} onClose={() => setToast(null)} />}
 
-      {/* Badge Notification */}
-      {badgeNotification && (
-        <BadgeNotification
-          badge={badgeNotification}
-          onClose={() => setBadgeNotification(null)}
-        />
-      )}
-
-        {/* Share Modal */}
-      <ShareModal
-        isOpen={showShareModal}
-        onClose={() => setShowShareModal(false)}
-        postId={post.id}
-        title={post.title}
-        onCopy={handleCopy}
-      />
-
-        {/* Repost Modal */}
       {showRepostModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-card rounded-2xl max-w-md w-full p-6 shadow-xl">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold">Repost Track</h3>
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={hasReposted ? 'Remove repost' : 'Repost track'}
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
+        >
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-base font-semibold">
+                {hasReposted ? 'Remove repost?' : 'Repost track'}
+              </h2>
               <button
+                type="button"
                 onClick={() => setShowRepostModal(false)}
-                className="p-1 hover:bg-secondary rounded-full transition-colors"
+                aria-label="Close"
+                className="rounded-full p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
               >
-                <X className="h-5 w-5" />
+                <X className="h-4 w-4" />
               </button>
             </div>
 
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-foreground mb-2">
-                Add a comment (optional)
-              </label>
+            {!hasReposted && (
               <textarea
                 value={repostCaption}
-                onChange={(e) => setRepostCaption(e.target.value)}
-                placeholder="What do you think about this track?"
-                className="w-full min-h-[100px] rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                onChange={(event) => setRepostCaption(event.target.value)}
+                placeholder="Add a note (optional)"
+                rows={3}
                 maxLength={500}
+                className="mb-4 w-full resize-none rounded-lg border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
-              <p className="text-xs text-muted-foreground mt-1">
-                {repostCaption.length}/500 characters
-              </p>
-            </div>
+            )}
 
-            <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setShowRepostModal(false)}
-                className="flex-1"
-              >
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setShowRepostModal(false)}>
                 Cancel
               </Button>
-              <Button
-                type="button"
-                onClick={handleRepost}
-                className="flex-1 bg-green-600 hover:bg-green-700"
-              >
-                <Repeat className="h-4 w-4 mr-2" />
-                Repost
+              <Button size="sm" onClick={hasReposted ? handleRemoveRepost : handleRepost}>
+                {hasReposted ? 'Remove' : 'Repost'}
               </Button>
             </div>
           </div>
         </div>
       )}
 
-         {/* Author Info */}
-      <div className="flex items-center gap-3 mb-4">
-        {post.author.avatarUrl ? (
-          <img
-            src={post.author.avatarUrl}
-            alt={post.author.username}
-            className="w-10 h-10 rounded-full object-cover"
-          />
-        ) : (
-          <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center">
-            <User className="h-5 w-5 text-muted-foreground" />
+      <div className="flex gap-3">
+        <Link
+          href={`/user/${post.author.id}`}
+          aria-label={post.author.username}
+          className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-muted"
+        >
+          {post.author.avatarUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={post.author.avatarUrl}
+              alt=""
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <span className="flex h-full w-full items-center justify-center">
+              <User className="h-4 w-4 text-muted-foreground" />
+            </span>
+          )}
+        </Link>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5 text-xs">
+            <Link
+              href={`/user/${post.author.id}`}
+              className="truncate font-medium hover:text-primary"
+            >
+              {post.author.username}
+            </Link>
+            <span className="text-muted-foreground/60">·</span>
+            <span className="shrink-0 text-muted-foreground">
+              {formatRelativeTime(post.createdAt)}
+            </span>
           </div>
-        )}
-        <div className="flex-1">
-          <Link 
-            href={`/user/${post.author.id}`} 
-            className="font-semibold hover:text-primary transition-colors"
+          <Link
+            href={`/post/${post.id}`}
+            className="mt-0.5 block truncate text-sm font-semibold hover:text-primary"
           >
-            {post.author.username}
+            {post.title}
           </Link>
-          <p className="text-xs text-muted-foreground">
-            {new Date(post.createdAt).toLocaleDateString(undefined, {
-              year: 'numeric',
-              month: 'short',
-              day: 'numeric',
-            })}
-          </p>
+          {metadata && <p className="truncate text-xs text-muted-foreground">{metadata}</p>}
         </div>
-      </div>
 
-      {/* Track Info */}
-      <div className="mb-4">
-        <h3 className="text-lg font-bold">{post.title}</h3>
-        <p className="text-muted-foreground">
-          {post.artist} • {post.album}
-          {post.genre && ` • ${post.genre}`}
-        </p>
-        {post.duration > 0 && (
-          <p className="text-sm text-muted-foreground">
-            Duration: {formatDuration(post.duration)}
-          </p>
+        {post.coverArtUrl && (
+          <Link
+            href={`/post/${post.id}`}
+            aria-label={`Open ${post.title}`}
+            className="h-14 w-14 shrink-0 overflow-hidden rounded-md bg-muted"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={post.coverArtUrl}
+              alt=""
+              className="h-full w-full object-cover"
+            />
+          </Link>
         )}
       </div>
 
-      {/* Cover Art */}
-      {post.coverArtUrl && (
-        <div className="mb-4">
-          <img
-            src={post.coverArtUrl}
-            alt={`${post.title} cover`}
-            className="w-full max-w-md rounded-lg object-cover shadow-md"
-          />
-        </div>
-      )}
-
-      {/* Authoritative player with signed, range-capable media URL */}
-      <div className="mb-4">
+      <div className="mt-3">
         <UnifiedMusicPlayer
+          variant="minimal"
           trackId={post.id}
           src={post.streamUrl}
           title={post.title}
@@ -729,165 +542,126 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
         />
       </div>
 
-         {/* Social Actions */}
-      <div className="flex items-center gap-2 pt-4 border-t">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={handleLike}
+      <div className="mt-3 flex items-center gap-1 border-t border-border/60 pt-2">
+        <ActionButton
+          label={hasLiked ? 'Unlike' : 'Like'}
+          count={likesCount}
+          active={hasLiked}
+          activeClassName="text-rose-500"
+          onClick={() => void handleLike()}
           disabled={isLiking}
-          className={`group transition-all ${
-            hasLiked ? 'text-red-500 hover:text-red-600' : 'hover:text-red-500'
-          }`}
         >
-          <Heart
-            className={`h-4 w-4 mr-2 transition-all ${
-              hasLiked ? 'fill-current scale-110' : 'group-hover:scale-110'
-            }`}
-          />
-          <span className="tabular-nums">{likesCount}</span>
-        </Button>
+          <Heart className={`h-4 w-4 ${hasLiked ? 'fill-current' : ''}`} />
+        </ActionButton>
 
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setShowComments(!showComments)}
-          className={`transition-all ${showComments ? 'text-primary' : ''}`}
+        <ActionButton
+          label={showComments ? 'Hide comments' : 'Show comments'}
+          count={commentsCount}
+          active={showComments}
+          activeClassName="text-primary"
+          onClick={() => setShowComments((value) => !value)}
         >
-          <MessageCircle className="h-4 w-4 mr-2" />
-          <span className="tabular-nums">{commentsCount}</span>
-        </Button>
+          <MessageCircle className="h-4 w-4" />
+        </ActionButton>
 
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setShowShareModal(true)}
-          className="hover:text-blue-500 transition-colors"
-        >
-          <Share2 className="h-4 w-4 mr-2" />
-          Share
-        </Button>
+        <ActionButton label="Share" onClick={() => void handleShare()}>
+          <Share2 className="h-4 w-4" />
+        </ActionButton>
 
-        <Button
-          variant="ghost"
-          size="sm"
+        <ActionButton
+          label={hasReposted ? 'Remove repost' : 'Repost'}
+          count={repostsCount}
+          active={hasReposted}
+          activeClassName="text-emerald-500"
           onClick={() => setShowRepostModal(true)}
-          className="hover:text-green-500 transition-colors"
         >
-          <Repeat className="h-4 w-4 mr-2" />
-          Repost
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => hasReposted ? handleRemoveRepost() : setShowRepostModal(true)}
-          className={`transition-all ${
-            hasReposted ? 'text-green-500 hover:text-green-600' : 'hover:text-green-500'
-          }`}
-        >
-          <Repeat
-            className={`h-4 w-4 mr-2 transition-all ${
-              hasReposted ? 'fill-current' : ''
-            }`}
-          />
-          <span className="tabular-nums">{repostsCount}</span>
-        </Button>
+          <Repeat className={`h-4 w-4 ${hasReposted ? 'fill-current' : ''}`} />
+        </ActionButton>
       </div>
 
-      {/* Comments Section */}
       {showComments && (
-        <div
-          ref={commentsRef}
-          className="mt-4 pt-4 border-t animate-in slide-in-from-top-2"
-        >
-          {/* Comment Input */}
-          <div className="mb-4">
-            <div className="relative">
-              <textarea
-                ref={commentInputRef}
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Add a comment..."
-                className="w-full bg-secondary/50 border-0 rounded-lg px-4 py-3 pr-24 resize-none focus:ring-2 focus:ring-primary/20 focus:outline-none text-sm min-h-[80px]"
-                maxLength={1000}
-              />
-              
-              {/* Timestamp Button */}
-              {post.duration > 0 && (
-                <button
-                  onClick={setTimestampFromPlayback}
-                  className="absolute bottom-3 left-3 text-xs text-muted-foreground hover:text-primary flex items-center gap-1 transition-colors"
-                  title="Add current playback timestamp"
-                >
-                  <Clock className="h-3 w-3" />
-                  Add timestamp
-                </button>
-              )}
-              
-              {/* Submit Button */}
-              <Button
-                size="sm"
-                onClick={handleSubmitComment}
-                disabled={!commentText.trim() || isSubmittingComment}
-                className="absolute bottom-3 right-3"
-              >
-                {isSubmittingComment ? (
-                  <div className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
-              </Button>
-            </div>
-            
-            {/* Selected Timestamp Display */}
-            {commentTimestamp !== null && (
-              <div className="mt-2 flex items-center gap-2">
-                <span className="inline-flex items-center gap-1 text-xs text-primary bg-primary/10 px-2 py-1 rounded-full">
-                  <Clock className="h-3 w-3" />
-                  At {formatTimestamp(commentTimestamp)}
-                </span>
-                <button
-                  onClick={() => setCommentTimestamp(null)}
-                  className="text-xs text-muted-foreground hover:text-red-500"
-                >
-                  Remove
-                </button>
-              </div>
-            )}
-            
-            <p className="text-xs text-muted-foreground mt-2 text-right">
-              {commentText.length}/1000
-            </p>
-          </div>
+        <section className="mt-3 border-t border-border/60 pt-3" aria-label="Comments">
+          <form
+            className="flex items-center gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleSubmitComment();
+            }}
+          >
+            <input
+              value={commentText}
+              onChange={(event) => setCommentText(event.target.value)}
+              placeholder="Add a comment"
+              maxLength={1000}
+              aria-label="Add a comment"
+              className="h-9 min-w-0 flex-1 rounded-full border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
 
-          {/* Comments List */}
-          <div className="space-y-1 max-h-[400px] overflow-y-auto">
-            {isLoadingComments ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary" />
-              </div>
-            ) : comments.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground">
-                <MessageCircle className="h-8 w-8 mx-auto mb-2 opacity-50" />
-                <p className="text-sm">No comments yet. Be the first to comment!</p>
-              </div>
-            ) : (
-              comments.map((comment) => (
+            {post.duration > 0 && (
+              <button
+                type="button"
+                onClick={setTimestampFromPlayback}
+                aria-label="Add playback timestamp"
+                title="Add playback timestamp"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border text-muted-foreground transition-colors hover:text-primary"
+              >
+                <Clock className="h-4 w-4" />
+              </button>
+            )}
+
+            <Button
+              type="submit"
+              size="icon"
+              disabled={!commentText.trim() || isSubmittingComment}
+              aria-label="Post comment"
+              className="h-9 w-9 shrink-0 rounded-full"
+            >
+              {isSubmittingComment ? (
+                <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
+            </Button>
+          </form>
+
+          {commentTimestamp !== null && (
+            <div className="mt-2 flex items-center gap-2 text-xs text-primary">
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5">
+                <Clock className="h-3 w-3" />
+                At {formatTimestamp(commentTimestamp)}
+              </span>
+              <button
+                type="button"
+                onClick={() => setCommentTimestamp(null)}
+                aria-label="Remove timestamp"
+                className="text-muted-foreground hover:text-destructive"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          )}
+
+          {isLoadingComments ? (
+            <div className="flex justify-center py-6">
+              <span className="h-5 w-5 animate-spin rounded-full border-2 border-muted border-t-primary" />
+            </div>
+          ) : comments.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">No comments yet.</p>
+          ) : (
+            <div className="mt-3 max-h-72 space-y-1 overflow-y-auto">
+              {comments.map((comment) => (
                 <CommentItem
                   key={comment.id}
                   comment={comment}
-                  currentUserId={currentUserId}
+                  currentUserId={viewerId}
                   onDelete={handleDeleteComment}
-                  trackDuration={post.duration}
                 />
-              ))
-            )}
-          </div>
-        </div>
+              ))}
+            </div>
+          )}
+        </section>
       )}
-    </div>
+    </article>
   );
 };
 

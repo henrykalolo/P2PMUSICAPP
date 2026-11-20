@@ -3,7 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { EnhancedFeedItem } from './EnhancedFeedItem';
-import { Repeat, User } from 'lucide-react';
+import { Repeat } from 'lucide-react';
 
 interface RepostItemProps {
   repost: {
@@ -46,47 +46,23 @@ interface RepostItemProps {
 
 export const RepostItem: React.FC<RepostItemProps> = ({ repost, currentUserId }) => {
   return (
-    <div className="bg-card border border-border/50 rounded-2xl p-6 mb-6 shadow-lg">
-      {/* Repost Header */}
-      <div className="flex items-center gap-2 mb-4 text-sm text-muted-foreground">
-        <Repeat className="h-4 w-4" />
-        <span>
-          <Link 
-            href={`/user/${repost.reposter.id}`}
-            className="font-semibold text-foreground hover:text-primary transition-colors"
-          >
-            {repost.reposter.username}
-          </Link>
-          {' reposted'}
-        </span>
-      </div>
-
-      {/* Repost Caption */}
-      {repost.caption && (
-        <div className="mb-4">
-          <p className="text-sm">{repost.caption}</p>
-        </div>
-      )}
-
-      {/* Original Post */}
-      <div className="bg-muted/30 rounded-lg p-4">
-        <EnhancedFeedItem 
-          post={repost.originalPost}
-          currentUserId={currentUserId}
-        />
-      </div>
-
-      {/* Original Poster Credit */}
-      <div className="mt-3 text-xs text-muted-foreground flex items-center gap-1">
-        <User className="h-3 w-3" />
-        <span>Original post by </span>
-        <Link 
-          href={`/user/${repost.originalPost.author.id}`}
-          className="font-semibold hover:text-primary transition-colors"
+    <div className="overflow-hidden rounded-xl border border-border/60 bg-card/50 p-3">
+      <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+        <Repeat className="h-3.5 w-3.5 shrink-0" />
+        <Link
+          href={`/user/${repost.reposter.id}`}
+          className="truncate font-medium text-foreground hover:text-primary"
         >
-          {repost.originalPost.author.username}
+          {repost.reposter.username}
         </Link>
+        <span>reposted</span>
+        <span className="text-muted-foreground/60">·</span>
+        <span className="shrink-0">{new Date(repost.createdAt).toLocaleDateString()}</span>
       </div>
+
+      {repost.caption && <p className="mb-2 text-sm">{repost.caption}</p>}
+
+      <EnhancedFeedItem post={repost.originalPost} currentUserId={currentUserId} />
     </div>
   );
 };

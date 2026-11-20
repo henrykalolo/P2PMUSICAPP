@@ -22,6 +22,8 @@ interface UnifiedMusicPlayerProps {
   title?: string;
   artist?: string;
   poster?: string;
+  /** Compact variant for feed cards; hides duplicated artwork and metadata. */
+  variant?: 'default' | 'minimal';
   /** Kept for backwards compatibility with older feed props; unused. */
   preferredStorage?: unknown;
   /** Kept for backwards compatibility; use trackId instead. */
@@ -43,6 +45,7 @@ export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
   title = 'Unknown Track',
   artist = 'Unknown Artist',
   poster,
+  variant = 'default',
 }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [mediaUrl, setMediaUrl] = useState<string | null>(src || null);
@@ -172,6 +175,90 @@ export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
 
   const ready = status === 'ready';
 
+  const audioElement = mediaUrl ? (
+    <audio
+      ref={audioRef}
+      src={mediaUrl}
+      preload="metadata"
+      onLoadedMetadata={(event) => {
+        setDuration(event.currentTarget.duration || 0);
+        setStatus('ready');
+      }}
+      onCanPlay={() => setStatus('ready')}
+      onTimeUpdate={handleProgress}
+      onProgress={handleProgress}
+      onPlay={() => setIsPlaying(true)}
+      onPause={() => setIsPlaying(false)}
+      onEnded={() => setIsPlaying(false)}
+      onError={() => {
+        void refreshPlaybackUrl();
+      }}
+      className="hidden"
+    />
+  ) : null;
+
+  if (variant === 'minimal') {
+    return (
+      <div className="w-full" aria-label={`Player for ${title}`}>
+        {error ? (
+          <div className="flex items-center gap-2 rounded-md bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{error}</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              size="icon"
+              variant="secondary"
+              onClick={() => void handlePlayPause()}
+              disabled={!ready || !mediaUrl}
+              aria-label={isPlaying ? 'Pause' : 'Play'}
+              className="h-8 w-8 shrink-0 rounded-full"
+            >
+              {isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+            </Button>
+
+            <div className="min-w-0 flex-1">
+              <div className="relative h-1 w-full overflow-hidden rounded bg-secondary">
+                <div
+                  className="absolute inset-y-0 left-0 bg-muted-foreground/40"
+                  style={{ width: `${Math.min(100, buffered)}%` }}
+                />
+                <div
+                  className="absolute inset-y-0 left-0 bg-primary"
+                  style={{
+                    width: `${duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0}%`,
+                  }}
+                />
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={0.1}
+                value={duration > 0 ? (currentTime / duration) * 100 : 0}
+                onChange={(event) => handleSeek(Number(event.target.value))}
+                disabled={!ready}
+                aria-label="Seek"
+                className="mt-0.5 h-3 w-full cursor-pointer disabled:cursor-not-allowed"
+              />
+              <div className="flex justify-between text-[10px] text-muted-foreground">
+                <span>{formatTime(currentTime)}</span>
+                <span>{formatTime(duration)}</span>
+              </div>
+            </div>
+
+            {status === 'loading' && (
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+            )}
+          </div>
+        )}
+        {audioElement}
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-lg border bg-card p-3" aria-label={`Player for ${title}`}>
       {poster && (
@@ -238,7 +325,7 @@ export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
         <Button
           type="button"
           size="icon"
-          onClick={handlePlayPause}
+          onClick={() => void handlePlayPause()}
           disabled={!ready || !mediaUrl}
           aria-label={isPlaying ? 'Pause' : 'Play'}
         >
@@ -267,27 +354,7 @@ export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
         />
       </div>
 
-      {mediaUrl && (
-        <audio
-          ref={audioRef}
-          src={mediaUrl}
-          preload="metadata"
-          onLoadedMetadata={(event) => {
-            setDuration(event.currentTarget.duration || 0);
-            setStatus('ready');
-          }}
-          onCanPlay={() => setStatus('ready')}
-          onTimeUpdate={handleProgress}
-          onProgress={handleProgress}
-          onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
-          onEnded={() => setIsPlaying(false)}
-          onError={() => {
-            void refreshPlaybackUrl();
-          }}
-          className="hidden"
-        />
-      )}
+      {audioElement}
     </div>
   );
 };
