@@ -8,7 +8,7 @@
  * optional redirect handled by the API, never a client-side dependency.
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle, Loader2, Pause, Play, SkipBack, SkipForward, Volume2 } from 'lucide-react';
 import { usePlayerStore } from '@/store/usePlayerStore';
@@ -37,6 +37,17 @@ function formatTime(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+function createEventId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+    const random = Math.floor(Math.random() * 16);
+    const value = char === 'x' ? random : (random & 0x3) | 0x8;
+    return value.toString(16);
+  });
 }
 
 interface WaveformProgressProps {
@@ -194,12 +205,37 @@ export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
   const [duration, setDuration] = useState(0);
   const [buffered, setBuffered] = useState(0);
   const retriedRef = useRef(false);
+  const playReportedRef = useRef(false);
 
   const { isPlaying, volume, setIsPlaying, setVolume } = usePlayerStore();
+
+  const reportEvent = useCallback(
+    (eventType: 'play' | 'complete' | 'skip', progress: number, total: number) => {
+      const token = localStorage.getItem('token');
+      if (!token || !UUID_RE.test(trackId)) return;
+      void fetch(`/api/tracks/${encodeURIComponent(trackId)}/play`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          eventType,
+          eventId: createEventId(),
+          progressSeconds: Math.max(0, Math.floor(progress || 0)),
+          durationSeconds: Math.max(0, Math.floor(total || 0)),
+        }),
+      }).catch(() => {
+        // Telemetry must never interrupt playback.
+      });
+    },
+    [trackId]
+  );
 
   // Resolve a short-lived playback URL when one was not supplied by the API.
   useEffect(() => {
     retriedRef.current = false;
+    playReportedRef.current = false;
     if (src) {
       setMediaUrl(src);
       setStatus('loading');
@@ -259,7 +295,9 @@ export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
   const handleSkip = (delta: number) => {
     const audio = audioRef.current;
     if (!audio || !Number.isFinite(audio.duration)) return;
-    audio.currentTime = Math.min(Math.max(0, audio.currentTime + delta), audio.duration);
+    const from = audio.currentTime;
+    audio.currentTime = Math.min(Math.max(0, from + delta), audio.duration);
+    if (delta > 0) reportEvent('skip', from, audio.duration);
   };
 
   const handleSeek = (value: number) => {
@@ -325,9 +363,19 @@ export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
       onCanPlay={() => setStatus('ready')}
       onTimeUpdate={handleProgress}
       onProgress={handleProgress}
-      onPlay={() => setIsPlaying(true)}
+      onPlay={(event) => {
+        setIsPlaying(true);
+        if (!playReportedRef.current) {
+          playReportedRef.current = true;
+          reportEvent('play', event.currentTarget.currentTime, event.currentTarget.duration || 0);
+        }
+      }}
       onPause={() => setIsPlaying(false)}
-      onEnded={() => setIsPlaying(false)}
+      onEnded={(event) => {
+        setIsPlaying(false);
+        reportEvent('complete', event.currentTarget.duration || 0, event.currentTarget.duration || 0);
+        playReportedRef.current = false;
+      }}
       onError={() => {
         void refreshPlaybackUrl();
       }}

@@ -10,6 +10,7 @@ import {
   Check,
   Clock,
   Heart,
+  ListMusic,
   MessageCircle,
   Repeat,
   Send,
@@ -204,6 +205,10 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
   const [repostsCount, setRepostsCount] = useState(0);
   const [showRepostModal, setShowRepostModal] = useState(false);
   const [repostCaption, setRepostCaption] = useState('');
+  const [showPlaylistModal, setShowPlaylistModal] = useState(false);
+  const [playlists, setPlaylists] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedPlaylistId, setSelectedPlaylistId] = useState('');
+  const [isSavingPlaylist, setIsSavingPlaylist] = useState(false);
 
   const notify = useCallback((message: string) => setToast(message), []);
 
@@ -415,6 +420,49 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
     }
   };
 
+  const openPlaylistModal = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      notify('Sign in to save tracks');
+      return;
+    }
+    try {
+      const response = await fetch('/api/social/playlists', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) throw new Error('Failed to load playlists');
+      const data = await response.json();
+      setPlaylists(data.playlists || []);
+      setSelectedPlaylistId(data.playlists?.[0]?.id || '');
+      setShowPlaylistModal(true);
+    } catch {
+      notify('Failed to load playlists');
+    }
+  };
+
+  const addToPlaylist = async () => {
+    const token = localStorage.getItem('token');
+    if (!token || !selectedPlaylistId) return;
+    setIsSavingPlaylist(true);
+    try {
+      const response = await fetch(`/api/social/playlists/${selectedPlaylistId}/tracks`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ trackId: post.id }),
+      });
+      if (!response.ok) throw new Error('Failed to add track');
+      notify('Added to playlist');
+      setShowPlaylistModal(false);
+    } catch {
+      notify('Failed to add track');
+    } finally {
+      setIsSavingPlaylist(false);
+    }
+  };
+
   const setTimestampFromPlayback = () => {
     const { currentTrack, progress: playerProgress } = usePlayerStore.getState();
     if (currentTrack?.id === post.id && post.duration > 0) {
@@ -467,6 +515,66 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
               </Button>
               <Button size="sm" onClick={hasReposted ? handleRemoveRepost : handleRepost}>
                 {hasReposted ? 'Remove' : 'Repost'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPlaylistModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Add to playlist"
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/60 p-4"
+        >
+          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-base font-semibold">Add to playlist</h2>
+              <button
+                type="button"
+                onClick={() => setShowPlaylistModal(false)}
+                aria-label="Close"
+                className="rounded-full p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {playlists.length === 0 ? (
+              <p className="mb-4 text-sm text-muted-foreground">
+                You do not have a playlist yet. Create one from the Playlists page first.
+              </p>
+            ) : (
+              <div className="mb-4 max-h-60 space-y-1 overflow-y-auto">
+                {playlists.map((playlist) => (
+                  <button
+                    key={playlist.id}
+                    type="button"
+                    onClick={() => setSelectedPlaylistId(playlist.id)}
+                    className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-colors ${
+                      selectedPlaylistId === playlist.id
+                        ? 'bg-primary/10 text-primary'
+                        : 'hover:bg-muted'
+                    }`}
+                  >
+                    <span className="truncate">{playlist.name}</span>
+                    {selectedPlaylistId === playlist.id && <Check className="h-4 w-4 shrink-0" />}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" size="sm" onClick={() => setShowPlaylistModal(false)}>
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                disabled={!selectedPlaylistId || isSavingPlaylist}
+                onClick={() => void addToPlaylist()}
+              >
+                {isSavingPlaylist ? 'Saving…' : 'Add'}
               </Button>
             </div>
           </div>
@@ -562,6 +670,10 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
           onClick={() => setShowComments((value) => !value)}
         >
           <MessageCircle className="h-4 w-4" />
+        </ActionButton>
+
+        <ActionButton label="Add to playlist" onClick={() => void openPlaylistModal()}>
+          <ListMusic className="h-4 w-4" />
         </ActionButton>
 
         <ActionButton label="Share" onClick={() => void handleShare()}>

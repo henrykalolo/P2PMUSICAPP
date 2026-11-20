@@ -16,6 +16,8 @@ import {
   type P2PStorageResult,
 } from '@/lib/storage/unifiedStorage';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 // ============================================
 // GET /api/tracks - Get all tracks
 // ============================================
@@ -39,8 +41,34 @@ export async function GET(request: NextRequest) {
     const artist = searchParams.get('artist');
     const genre = searchParams.get('genre');
     const authorId = searchParams.get('authorId');
+    const mode = searchParams.get('mode') || 'latest';
+
+    const authHeader = request.headers.get('authorization');
+    const viewerId = authHeader?.startsWith('Bearer ')
+      ? (await verifyToken(authHeader.slice(7)))?.userId || null
+      : null;
+
+    if (mode === 'following' && !viewerId) {
+      return NextResponse.json(
+        { error: 'Sign in to see tracks from people you follow' },
+        { status: 401 }
+      );
+    }
+
+    let preferredGenres: string[] = [];
+    if (mode === 'for-you' && viewerId) {
+      const preferenceResult = await query(
+        `SELECT preference_value FROM music_preferences
+          WHERE user_id = $1 AND preference_type = 'genre'`,
+        [viewerId]
+      );
+      preferredGenres = preferenceResult.rows
+        .map((row: Record<string, any>) => String(row.preference_value || ''))
+        .filter(Boolean);
+    }
 
     let sql = `
+      WITH filtered AS (
       SELECT
         p.id,
         p.title,
@@ -56,6 +84,9 @@ export async function GET(request: NextRequest) {
         p.server_storage_id,
         p.cover_art_url,
         p.description,
+        p.album_id,
+        p.play_count,
+        p.share_count,
         p.file_size,
         p.mime_type,
         p.is_encrypted,
@@ -67,7 +98,8 @@ export async function GET(request: NextRequest) {
         u.badge as author_badge,
         (SELECT COUNT(*) FROM likes WHERE post_id = p.id) as likes_count,
         (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comments_count,
-        (SELECT COUNT(*) FROM reposts WHERE post_id = p.id) as reposts_count
+        (SELECT COUNT(*) FROM reposts WHERE post_id = p.id) as reposts_count,
+        (SELECT COUNT(*) FROM play_events WHERE post_id = p.id AND event_type = 'complete') as completions_count
       FROM posts p
       JOIN users u ON p.author_id = u.id
       WHERE 1=1
@@ -94,7 +126,45 @@ export async function GET(request: NextRequest) {
       paramIndex++;
     }
 
-    sql += ` ORDER BY p.created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+    if (mode === 'following' && viewerId) {
+      sql += ` AND EXISTS (
+        SELECT 1 FROM follows f
+         WHERE f.follower_id = $${paramIndex}::uuid AND f.following_id = p.author_id
+      )`;
+      params.push(viewerId);
+      paramIndex++;
+    }
+
+    sql += `) SELECT * FROM filtered`;
+
+    if (mode === 'for-you') {
+      const viewerParam = `$${paramIndex}`;
+      const genreParam = `$${paramIndex + 1}`;
+      params.push(viewerId, preferredGenres);
+      paramIndex += 2;
+      sql += ` ORDER BY (
+          COALESCE(likes_count, 0) * 2 +
+          COALESCE(reposts_count, 0) * 3 +
+          COALESCE(comments_count, 0) +
+          COALESCE(play_count, 0) * 0.5 +
+          COALESCE(completions_count, 0) * 2 +
+          CASE WHEN ${viewerParam}::uuid IS NOT NULL AND author_id = ${viewerParam}::uuid THEN 1 ELSE 0 END +
+          CASE WHEN ${viewerParam}::uuid IS NOT NULL AND EXISTS (
+            SELECT 1 FROM follows f
+             WHERE f.follower_id = ${viewerParam}::uuid AND f.following_id = author_id
+          ) THEN 8 ELSE 0 END +
+          CASE WHEN ${genreParam}::text[] <> '{}' AND COALESCE(genre, '') = ANY(${genreParam}::text[]) THEN 4 ELSE 0 END +
+          CASE WHEN ${viewerParam}::uuid IS NOT NULL AND EXISTS (
+            SELECT 1 FROM likes l
+             WHERE l.user_id = ${viewerParam}::uuid AND l.post_id = id
+          ) THEN 2 ELSE 0 END -
+          LEAST(EXTRACT(EPOCH FROM (NOW() - created_at)) / 86400.0 * 0.15, 20)
+        ) DESC, created_at DESC`;
+    } else {
+      sql += ` ORDER BY created_at DESC`;
+    }
+
+    sql += ` LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
     params.push(limit, offset);
 
     const result = await query(sql, params);
@@ -106,6 +176,7 @@ export async function GET(request: NextRequest) {
         title: row.title,
         artist: row.artist,
         album: row.album,
+        albumId: row.album_id,
         genre: row.genre,
         year: row.year,
         duration: row.duration,
@@ -131,11 +202,14 @@ export async function GET(request: NextRequest) {
         likesCount: parseInt(row.likes_count),
         commentsCount: parseInt(row.comments_count),
         repostsCount: parseInt(row.reposts_count),
+        playsCount: parseInt(row.play_count) || 0,
+        sharesCount: parseInt(row.share_count) || 0,
       })),
       pagination: {
         limit,
         offset,
         total: result.rowCount,
+        mode,
       },
     });
   } catch (error) {
@@ -218,6 +292,7 @@ export async function POST(request: NextRequest) {
     const duration = formData.get('duration') ? parseInt(formData.get('duration') as string) : undefined;
     const coverArtUrl = formData.get('coverArtUrl') as string | null;
     const description = (formData.get('description') as string | null)?.trim() || null;
+    const albumIdRaw = formData.get('albumId') as string | null;
 
     // Metadata-only mode (file already uploaded via /api/storage)
     const metadataOnly = formData.get('metadataOnly') === 'true';
@@ -235,6 +310,21 @@ export async function POST(request: NextRequest) {
     }
     if (coverArtUrl && !isAllowedImageUrl(coverArtUrl)) {
       return NextResponse.json({ error: 'Invalid cover art URL' }, { status: 400 });
+    }
+
+    let albumId: string | null = null;
+    if (albumIdRaw) {
+      if (!UUID_RE.test(albumIdRaw)) {
+        return NextResponse.json({ error: 'Invalid album id' }, { status: 400 });
+      }
+      const albumCheck = await query('SELECT id FROM albums WHERE id = $1 AND owner_id = $2', [
+        albumIdRaw,
+        payload.userId,
+      ]);
+      if (albumCheck.rows.length === 0) {
+        return NextResponse.json({ error: 'Album not found' }, { status: 404 });
+      }
+      albumId = albumIdRaw;
     }
     if (year !== undefined && (!Number.isFinite(year) || year < 1900 || year > new Date().getFullYear() + 1)) {
       return NextResponse.json({ error: 'Invalid release year' }, { status: 400 });
@@ -366,9 +456,10 @@ export async function POST(request: NextRequest) {
         mime_type,
         cover_art_url,
         description,
+        album_id,
         is_encrypted,
         encryption_iv
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
       RETURNING *`,
       [
         payload.userId,
@@ -387,6 +478,7 @@ export async function POST(request: NextRequest) {
         mimeType,
         coverArtUrl || null,
         description,
+        albumId,
         isEncrypted,
         encryptionIv ? Buffer.from(encryptionIv, 'hex') : null,
       ]
@@ -408,6 +500,7 @@ export async function POST(request: NextRequest) {
         title: track.title,
         artist: track.artist,
         album: track.album,
+        albumId: track.album_id,
         genre: track.genre,
         year: track.year,
         duration: track.duration_seconds,

@@ -38,6 +38,8 @@ interface Track {
   duration: number;
   ipfsCid?: string;
   streamUrl?: string | null;
+  storageType?: string;
+  serverStorageId?: string;
   coverArtUrl?: string;
   createdAt: string;
   author: {
@@ -49,10 +51,19 @@ interface Track {
   commentsCount: number;
 }
 
+interface Genre {
+  name: string;
+  count: number;
+}
+
 export default function DiscoverPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [tracks, setTracks] = useState<Track[]>([]);
+  const [searchUsers, setSearchUsers] = useState<User[]>([]);
+  const [searchTracks, setSearchTracks] = useState<Track[]>([]);
+  const [genres, setGenres] = useState<Genre[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isSearching, setIsSearching] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'users' | 'tracks'>('users');
   const { user, isAuthenticated } = useAuthStore();
@@ -100,6 +111,38 @@ export default function DiscoverPage() {
     }
   };
 
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (!query) {
+      setSearchUsers([]);
+      setSearchTracks([]);
+      setIsSearching(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    setIsSearching(true);
+    const timer = setTimeout(() => {
+      fetch(`/api/search?q=${encodeURIComponent(query)}&limit=30`, { signal: controller.signal })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((data) => {
+          if (!data || controller.signal.aborted) return;
+          setSearchUsers(data.users || []);
+          setSearchTracks(data.tracks || []);
+          setGenres(data.genres || []);
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          if (!controller.signal.aborted) setIsSearching(false);
+        });
+    }, 220);
+
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [searchQuery]);
+
   const handleFollow = async (userId: string) => {
     if (!isAuthenticated) {
       alert('Please sign in to follow users');
@@ -123,7 +166,7 @@ export default function DiscoverPage() {
       });
 
       if (response.ok) {
-        setUsers(prev => prev.map(u => {
+        const toggle = (list: User[]) => list.map(u => {
           if (u.id === userId) {
             return {
               ...u,
@@ -132,7 +175,9 @@ export default function DiscoverPage() {
             };
           }
           return u;
-        }));
+        });
+        setUsers(toggle);
+        setSearchUsers(toggle);
       }
     } catch (error) {
       console.error('Follow error:', error);
@@ -171,14 +216,17 @@ export default function DiscoverPage() {
     }
   };
 
-  const filteredUsers = users.filter(u => 
-    u.username.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const hasQuery = searchQuery.trim().length > 0;
+  const filteredUsers = hasQuery
+    ? searchUsers
+    : users.filter(u => u.username.toLowerCase().includes(searchQuery.toLowerCase()));
 
-  const filteredTracks = tracks.filter(t => 
-    t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    t.artist.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredTracks = hasQuery
+    ? searchTracks
+    : tracks.filter(t =>
+        t.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        t.artist.toLowerCase().includes(searchQuery.toLowerCase())
+      );
 
   if (isLoading) {
     return (
@@ -225,6 +273,24 @@ export default function DiscoverPage() {
               className="w-full pl-12 pr-4 py-3 rounded-xl border border-border bg-card focus:outline-none focus:ring-2 focus:ring-primary"
             />
           </div>
+
+          {genres.length > 0 && (
+            <div className="mb-6 flex flex-wrap gap-2">
+              {genres.map((genre) => (
+                <button
+                  key={genre.name}
+                  type="button"
+                  onClick={() => {
+                    setSearchQuery(genre.name);
+                    setActiveTab('tracks');
+                  }}
+                  className="rounded-full border border-border/70 bg-card px-3 py-1 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                >
+                  {genre.name} · {genre.count}
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Tabs */}
           <div className="flex gap-4 mb-6">

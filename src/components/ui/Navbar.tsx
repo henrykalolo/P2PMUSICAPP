@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import {
+  BarChart3,
   Bell,
   Compass,
   Heart,
@@ -14,8 +15,10 @@ import {
   Menu,
   Music,
   PlusSquare,
+  Moon,
   Search,
   Settings,
+  Sun,
   TrendingUp,
   User,
   Wifi,
@@ -23,6 +26,7 @@ import {
   X,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useTheme } from '@/components/providers/ThemeProvider';
 import { useNotifications } from '@/context/NotificationContext';
 import NotificationBell from '@/components/notifications/NotificationBell';
 import { Button } from '@/components/ui/button';
@@ -44,6 +48,7 @@ export default function Navbar({ onTogglePrimarySidebar, onToggleSecondarySideba
   const pathname = usePathname();
   const router = useRouter();
   const { user, setUser, setAuthenticated } = useAuthStore();
+  const { theme, toggleTheme } = useTheme();
   const { isConnected: isNotificationConnected } = useNotifications();
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -163,6 +168,16 @@ export default function Navbar({ onTogglePrimarySidebar, onToggleSecondarySideba
 
           <button
             type="button"
+            onClick={toggleTheme}
+            className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground"
+            aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+          >
+            {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+          </button>
+
+          <button
+            type="button"
             onClick={() => setIsSearchOpen((open) => !open)}
             className="rounded-lg p-2 text-muted-foreground transition-colors hover:bg-accent/10 hover:text-foreground"
             aria-label={isSearchOpen ? 'Close search' : 'Search'}
@@ -219,6 +234,9 @@ export default function Navbar({ onTogglePrimarySidebar, onToggleSecondarySideba
                     </Link>
                     <Link className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-accent/10" href="/playlists" onClick={() => setIsUserMenuOpen(false)}>
                       <ListMusic className="h-4 w-4" /> Playlists
+                    </Link>
+                    <Link className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-accent/10" href="/analytics" onClick={() => setIsUserMenuOpen(false)}>
+                      <BarChart3 className="h-4 w-4" /> Analytics
                     </Link>
                     <Link className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-accent/10" href="/notifications" onClick={() => setIsUserMenuOpen(false)}>
                       <Bell className="h-4 w-4" /> Notifications

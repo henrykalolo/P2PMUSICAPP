@@ -94,6 +94,22 @@ CREATE TRIGGER trigger_mutual_check
 -- ------------------------------------------------------------
 -- Content
 -- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS albums (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  artist TEXT,
+  description TEXT,
+  genre TEXT,
+  release_date DATE,
+  cover_art_url TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_albums_owner ON albums(owner_id);
+CREATE INDEX IF NOT EXISTS idx_albums_release_date ON albums(release_date DESC);
+
 CREATE TABLE IF NOT EXISTS posts (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   author_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -123,12 +139,18 @@ CREATE TABLE IF NOT EXISTS posts (
   encryption_alg TEXT NOT NULL DEFAULT 'aes-256-gcm',
   cover_art_url TEXT,
   description TEXT,
+  album_id UUID REFERENCES albums(id) ON DELETE SET NULL,
+  play_count BIGINT NOT NULL DEFAULT 0,
+  share_count BIGINT NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Existing installations predate the description column.
+-- Existing installations predate these columns.
 ALTER TABLE posts ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS album_id UUID REFERENCES albums(id) ON DELETE SET NULL;
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS play_count BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS share_count BIGINT NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS idx_posts_author ON posts(author_id);
 CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);
@@ -166,6 +188,22 @@ CREATE TABLE IF NOT EXISTS reposts (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (user_id, post_id)
 );
+
+-- Listening telemetry used for analytics, recently played and discovery ranking.
+CREATE TABLE IF NOT EXISTS play_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  event_type TEXT NOT NULL CHECK (event_type IN ('play', 'complete', 'skip')),
+  client_event_id TEXT UNIQUE,
+  progress_seconds INT NOT NULL DEFAULT 0,
+  duration_seconds INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_play_events_user_created ON play_events(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_play_events_post_created ON play_events(post_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_play_events_post_type ON play_events(post_id, event_type);
 
 CREATE TABLE IF NOT EXISTS playlists (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -256,6 +294,38 @@ CREATE TABLE IF NOT EXISTS notifications (
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
 CREATE INDEX IF NOT EXISTS idx_notifications_user_unread ON notifications(user_id, read) WHERE read = FALSE;
 CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC);
+
+-- ------------------------------------------------------------
+-- Direct messages
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS conversations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS conversation_participants (
+  conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  last_read_at TIMESTAMPTZ,
+  joined_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  PRIMARY KEY (conversation_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversation_participants_user
+  ON conversation_participants(user_id, joined_at DESC);
+
+CREATE TABLE IF NOT EXISTS conversation_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  sender_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  body TEXT NOT NULL CHECK (char_length(body) BETWEEN 1 AND 2000),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_conversation_messages_conversation_created
+  ON conversation_messages(conversation_id, created_at DESC);
 
 -- ------------------------------------------------------------
 -- Swarm bookkeeping (optional P2P acceleration layer)

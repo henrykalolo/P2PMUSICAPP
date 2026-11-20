@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
     let suggestions;
     if (preferenceValues.length > 0) {
       const result = await query(
-        `SELECT DISTINCT u.id, u.username, u.avatar_url, u.artist_bio,
+        `SELECT u.id, u.username, u.avatar_url, u.artist_bio,
                 u.is_artist, u.badge, u.trust_score,
                 COUNT(mp.preference_value) as matching_preferences
          FROM users u
@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
          WHERE u.id != $1
            AND f.follower_id IS NULL
            AND mp.preference_value = ANY($2)
-         GROUP BY u.id, u.username, u.avatar_url, u.artist_bio, u.is_artist, u.badge, u.trust_score
+         GROUP BY u.id, u.username, u.avatar_url, u.artist_bio, u.is_artist, u.badge, u.trust_score, u.created_at
          ORDER BY matching_preferences DESC, u.created_at DESC
          LIMIT 20`,
         [userId, preferenceValues]
@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
     } else {
       // If no preferences, return most active users
       const result = await query(
-        `SELECT DISTINCT u.id, u.username, u.avatar_url, u.artist_bio,
+        `SELECT u.id, u.username, u.avatar_url, u.artist_bio,
                 u.is_artist, u.badge, u.trust_score,
                 0 as matching_preferences
          FROM users u

@@ -46,11 +46,20 @@ interface Repost {
   originalPost: Track;
 }
 
+type FeedMode = 'latest' | 'for-you' | 'following';
+
+const FEED_MODES: Array<{ id: FeedMode; label: string; authOnly?: boolean }> = [
+  { id: 'for-you', label: 'For You' },
+  { id: 'latest', label: 'Latest' },
+  { id: 'following', label: 'Following', authOnly: true },
+];
+
 export default function FeedPage() {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [reposts, setReposts] = useState<Repost[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<FeedMode>('for-you');
   const { user, isAuthenticated, setUser, setAuthenticated, setLoading } = useAuthStore();
 
   useEffect(() => {
@@ -82,11 +91,9 @@ export default function FeedPage() {
     }
   }, [setUser, setAuthenticated, setLoading]);
 
-  useEffect(() => {
-    fetchFeedData();
-  }, []);
-
-  const fetchFeedData = async () => {
+  const fetchFeedData = async (feedMode: FeedMode = mode) => {
+    setIsLoading(true);
+    setError(null);
     try {
       const token = localStorage.getItem('token');
       const headers: Record<string, string> = {};
@@ -95,20 +102,25 @@ export default function FeedPage() {
       }
 
       const [tracksResponse, repostsResponse] = await Promise.all([
-        fetch('/api/tracks'),
-        fetch('/api/social/reposts', { headers })
+        fetch(`/api/tracks?mode=${feedMode}&limit=50`, { headers }),
+        feedMode === 'following'
+          ? Promise.resolve(null)
+          : fetch('/api/social/reposts', { headers })
       ]);
 
       // Handle reposts separately - 401 is expected for unauthenticated users
       let repostsData = { reposts: [] };
-      if (repostsResponse.ok) {
-        repostsData = await repostsResponse.json();
-      } else if (repostsResponse.status !== 401) {
-        throw new Error('Failed to fetch reposts');
+      if (repostsResponse) {
+        if (repostsResponse.ok) {
+          repostsData = await repostsResponse.json();
+        } else if (repostsResponse.status !== 401) {
+          throw new Error('Failed to fetch reposts');
+        }
       }
 
       if (!tracksResponse.ok) {
-        throw new Error('Failed to fetch tracks');
+        const data = await tracksResponse.json().catch(() => null);
+        throw new Error(data?.error || 'Failed to fetch tracks');
       }
 
       const tracksData = await tracksResponse.json();
@@ -121,6 +133,11 @@ export default function FeedPage() {
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    void fetchFeedData(mode);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -201,12 +218,30 @@ export default function FeedPage() {
               </div>
             )}
 
-            <h1 className="text-3xl font-bold mb-8">Your Feed</h1>
+            <div className="mb-8">
+              <h1 className="text-3xl font-bold">Your Feed</h1>
+              <div className="mt-4 flex gap-2 border-b border-border/60">
+                {FEED_MODES.filter((item) => !item.authOnly || isAuthenticated).map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setMode(item.id)}
+                    className={`border-b-2 px-1 pb-2 text-sm font-medium transition-colors ${
+                      mode === item.id
+                        ? 'border-primary text-primary'
+                        : 'border-transparent text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             {error ? (
               <div className="text-center py-12">
                 <p className="text-muted-foreground mb-4">{error}</p>
-                <Button onClick={fetchFeedData}>Retry</Button>
+                <Button onClick={() => void fetchFeedData(mode)}>Retry</Button>
               </div>
             ) : feedItems.length === 0 ? (
               <div className="text-center py-12 border rounded-lg">

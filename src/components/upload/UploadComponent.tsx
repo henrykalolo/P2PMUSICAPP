@@ -158,6 +158,17 @@ export const UploadComponent: React.FC<UploadComponentProps> = ({ onUploadComple
   const [metadata, setMetadata] = useState<TrackMetadata | null>(null);
   const [isExtractingMetadata, setIsExtractingMetadata] = useState(false);
   const [success, setSuccess] = useState<UploadSuccess | null>(null);
+  const [albums, setAlbums] = useState<Array<{ id: string; title: string }>>([]);
+  const [selectedAlbumId, setSelectedAlbumId] = useState('');
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    fetch('/api/albums', { headers: { Authorization: `Bearer ${token}` } })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => setAlbums(data?.albums || []))
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -337,6 +348,7 @@ export const UploadComponent: React.FC<UploadComponentProps> = ({ onUploadComple
       formData.append('year', String(metadata.year));
       formData.append('duration', String(metadata.duration));
       formData.append('description', metadata.description.trim());
+      if (selectedAlbumId) formData.append('albumId', selectedAlbumId);
       if (storedCoverUrl || displayCoverUrl) {
         formData.append('coverArtUrl', storedCoverUrl || displayCoverUrl!);
       }
@@ -395,6 +407,7 @@ export const UploadComponent: React.FC<UploadComponentProps> = ({ onUploadComple
     setCoverFile(null);
     if (coverPreview?.startsWith('blob:')) URL.revokeObjectURL(coverPreview);
     setCoverPreview(null);
+    setSelectedAlbumId('');
     setError(null);
     setUploadProgress(0);
   };
@@ -508,6 +521,32 @@ export const UploadComponent: React.FC<UploadComponentProps> = ({ onUploadComple
                 disabled={isUploading}
               />
             </div>
+            {albums.length > 0 && (
+              <div>
+                <label className="block text-sm font-medium text-muted-foreground mb-1">
+                  Add to release (optional)
+                </label>
+                <select
+                  value={selectedAlbumId}
+                  onChange={(event) => {
+                    const albumId = event.target.value;
+                    setSelectedAlbumId(albumId);
+                    const album = albums.find((item) => item.id === albumId);
+                    if (album) setMetadata((prev) => (prev ? { ...prev, album: album.title } : prev));
+                  }}
+                  disabled={isUploading}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground"
+                >
+                  <option value="">No release</option>
+                  {albums.map((album) => (
+                    <option key={album.id} value={album.id}>{album.title}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Create releases on the <Link href="/albums" className="text-primary hover:underline">Releases</Link> page.
+                </p>
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-muted-foreground mb-1">Genre</label>
               <Input

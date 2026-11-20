@@ -25,7 +25,7 @@ export async function GET(
 
     // Get followers with their info
     const result = await query(`
-      SELECT DISTINCT
+      SELECT
         u.id,
         u.username,
         u.avatar_url,

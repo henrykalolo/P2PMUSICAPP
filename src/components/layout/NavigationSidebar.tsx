@@ -3,13 +3,16 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
+  BarChart3,
   Bell,
   BookOpen,
   Compass,
+  Disc3,
   Heart,
   Home,
   LayoutDashboard,
   ListMusic,
+  MessageCircle,
   Scale,
   Settings,
   Shield,
@@ -35,11 +38,14 @@ const primaryLinks: NavLink[] = [
   { href: '/discover', label: 'Discover', icon: Compass },
   { href: '/trending', label: 'Trending', icon: TrendingUp },
   { href: '/upload', label: 'Upload', icon: Upload, authOnly: true },
+  { href: '/albums', label: 'Releases', icon: Disc3, authOnly: true },
   { href: '/playlists', label: 'Playlists', icon: ListMusic },
   { href: '/liked', label: 'Liked', icon: Heart, authOnly: true },
+  { href: '/analytics', label: 'Analytics', icon: BarChart3, authOnly: true },
 ];
 
 const accountLinks: NavLink[] = [
+  { href: '/messages', label: 'Messages', icon: MessageCircle, authOnly: true },
   { href: '/notifications', label: 'Notifications', icon: Bell, authOnly: true },
   { href: '/profile', label: 'Profile', icon: User, authOnly: true },
   { href: '/profile/settings', label: 'Settings', icon: Settings, authOnly: true },

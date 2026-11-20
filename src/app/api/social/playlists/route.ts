@@ -83,7 +83,7 @@ export async function GET(request: NextRequest) {
           p.storage_type,
           p.server_storage_id,
           p.ipfs_cid,
-          t.author_id,
+          t.id as author_id,
           t.username as author_username,
           t.avatar_url as author_avatar
         FROM playlist_tracks pt
