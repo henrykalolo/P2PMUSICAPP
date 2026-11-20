@@ -97,6 +97,14 @@ export default function MessagesPage() {
   }, [authLoading, isAuthenticated, loadConversations]);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
+    const conversationId = new URLSearchParams(window.location.search).get('conversationId');
+    if (!conversationId) return;
+    setSelectedId(conversationId);
+    void loadMessages(conversationId, true);
+  }, [isAuthenticated, loadMessages]);
+
+  useEffect(() => {
     if (!isAuthenticated || !searchQuery.trim()) {
       setSearchResults([]);
       return;

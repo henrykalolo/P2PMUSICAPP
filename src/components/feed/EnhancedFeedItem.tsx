@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { UnifiedMusicPlayer } from '@/components/player/UnifiedMusicPlayer';
 import { Button } from '@/components/ui/button';
 import { useAuthStore } from '@/store/useAuthStore';
-import { usePlayerStore } from '@/store/usePlayerStore';
+import { usePlayerStore, type Track } from '@/store/usePlayerStore';
 import {
   Check,
   Clock,
@@ -56,6 +56,9 @@ interface FeedItemProps {
     userHasLiked?: boolean;
   };
   currentUserId?: string;
+  /** Surrounding tracks so playback continues after this item ends. */
+  queue?: Track[];
+  queueContext?: string;
 }
 
 const formatTimestamp = (seconds: number): string => {
@@ -186,7 +189,12 @@ const CommentItem: React.FC<{
   );
 };
 
-export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId }) => {
+export const EnhancedFeedItem: React.FC<FeedItemProps> = ({
+  post,
+  currentUserId,
+  queue,
+  queueContext,
+}) => {
   const { user } = useAuthStore();
   const viewerId = currentUserId ?? user?.id;
 
@@ -646,7 +654,11 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
           src={post.streamUrl}
           title={post.title}
           artist={post.artist}
+          album={post.album}
           poster={post.coverArtUrl}
+          duration={post.duration}
+          queue={queue}
+          queueContext={queueContext}
         />
       </div>
 

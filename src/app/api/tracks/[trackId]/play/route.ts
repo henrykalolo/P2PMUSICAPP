@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { verifyToken } from '@/lib/auth/jwt';
+import { verifyMediaToken } from '@/lib/media/signed-url';
 
 export const runtime = 'nodejs';
 
@@ -26,23 +27,41 @@ export async function POST(
     return NextResponse.json({ error: 'Invalid track id' }, { status: 400 });
   }
 
-  const authHeader = request.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  let body: {
+    eventType?: unknown;
+    progressSeconds?: unknown;
+    durationSeconds?: unknown;
+    eventId?: unknown;
+    playbackToken?: unknown;
+  };
+
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
   }
-  const payload = await verifyToken(authHeader.slice(7));
-  if (!payload) {
-    return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+  if (!body || typeof body !== 'object') {
+    return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
+  }
+
+  // Signed playback URLs are public and range-capable, so anonymous listeners
+  // can report telemetry with the same token the audio element already uses.
+  const authHeader = request.headers.get('authorization');
+  let userId: string | null = null;
+  if (authHeader?.startsWith('Bearer ')) {
+    const payload = await verifyToken(authHeader.slice(7));
+    if (!payload) {
+      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+    }
+    userId = payload.userId;
+  } else if (
+    typeof body.playbackToken !== 'string' ||
+    !verifyMediaToken(trackId, body.playbackToken)
+  ) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
-    const body = (await request.json()) as {
-      eventType?: unknown;
-      progressSeconds?: unknown;
-      durationSeconds?: unknown;
-      eventId?: unknown;
-    };
-
     if (typeof body.eventType !== 'string' || !EVENT_TYPES.has(body.eventType)) {
       return NextResponse.json({ error: 'Invalid event type' }, { status: 400 });
     }
@@ -64,7 +83,7 @@ export async function POST(
        ON CONFLICT (client_event_id) DO NOTHING
        RETURNING id`,
       [
-        payload.userId,
+        userId,
         trackId,
         body.eventType,
         eventId,

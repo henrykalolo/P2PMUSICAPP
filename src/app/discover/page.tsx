@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { EnhancedFeedItem } from '@/components/feed/EnhancedFeedItem';
 import { useAuthStore } from '@/store/useAuthStore';
+import type { Track as PlayerTrack } from '@/store/usePlayerStore';
 import { 
   Music, 
   Search, 
@@ -14,7 +15,9 @@ import {
   Check,
   UserPlus,
   Sparkles,
-  RefreshCw
+  RefreshCw,
+  Loader2,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface User {
@@ -66,6 +69,8 @@ export default function DiscoverPage() {
   const [isSearching, setIsSearching] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'users' | 'tracks'>('users');
+  const [isGeneratingMix, setIsGeneratingMix] = useState(false);
+  const [mixError, setMixError] = useState<string | null>(null);
   const { user, isAuthenticated } = useAuthStore();
 
   useEffect(() => {
@@ -186,10 +191,12 @@ export default function DiscoverPage() {
 
   const generateAutoPlaylist = async () => {
     if (!isAuthenticated) {
-      alert('Please sign in to generate personalized playlists');
+      setMixError('Please sign in to generate a personalized mix.');
       return;
     }
 
+    setIsGeneratingMix(true);
+    setMixError(null);
     try {
       const token = localStorage.getItem('token');
       const response = await fetch('/api/social/playlists/auto', {
@@ -204,15 +211,23 @@ export default function DiscoverPage() {
           limit: 30,
         }),
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        // Store the auto-generated playlist in localStorage for the player
-        localStorage.setItem('autoPlaylist', JSON.stringify(data.playlist));
-        window.location.href = '/feed?playlist=auto';
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Unable to generate your mix');
       }
+      const tracks = data.playlist?.tracks || [];
+      if (tracks.length === 0) {
+        setMixError('No tracks matched your preferences yet. Try following a few artists first.');
+        return;
+      }
+
+      // Hand the generated mix to the feed, where it becomes a playable queue.
+      localStorage.setItem('autoPlaylist', JSON.stringify(data.playlist));
+      window.location.href = '/feed?playlist=auto';
     } catch (error) {
-      console.error('Auto playlist error:', error);
+      setMixError(error instanceof Error ? error.message : 'Unable to generate your mix');
+    } finally {
+      setIsGeneratingMix(false);
     }
   };
 
@@ -254,12 +269,23 @@ export default function DiscoverPage() {
             
             {/* Auto Playlist Button */}
             <Button 
-              onClick={generateAutoPlaylist}
+              onClick={() => void generateAutoPlaylist()}
+              disabled={isGeneratingMix}
               className="bg-gradient-to-r from-primary to-accent hover:from-primary/90 hover:to-accent/90"
             >
-              <Sparkles className="h-4 w-4 mr-2" />
-              Generate Personalized Mix
+              {isGeneratingMix ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4 mr-2" />
+              )}
+              {isGeneratingMix ? 'Building your mix…' : 'Generate Personalized Mix'}
             </Button>
+            {mixError && (
+              <p role="alert" className="mt-3 flex items-center gap-2 text-sm text-destructive">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                {mixError}
+              </p>
+            )}
           </div>
 
           {/* Search */}
@@ -409,7 +435,12 @@ export default function DiscoverPage() {
                 </div>
               ) : (
                 filteredTracks.map((track) => (
-                  <EnhancedFeedItem key={track.id} post={track} />
+                  <EnhancedFeedItem
+                    key={track.id}
+                    post={track}
+                    queue={filteredTracks as PlayerTrack[]}
+                    queueContext="Discover"
+                  />
                 ))
               )}
             </div>

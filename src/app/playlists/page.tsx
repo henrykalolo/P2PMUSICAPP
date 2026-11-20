@@ -1,27 +1,20 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { EnhancedFeedItem } from '@/components/feed/EnhancedFeedItem';
 import { useAuthStore } from '@/store/useAuthStore';
-import { 
-  Music, 
-  ArrowLeft, 
-  Plus, 
+import {
+  Loader2,
+  Plus,
   ListMusic,
   MoreHorizontal,
-  Trash2,
-  Share2,
   Play,
-  Pause,
   Sparkles,
-  Users,
   Globe,
   Lock,
-  X
+  X,
 } from 'lucide-react';
-import { usePlayerStore } from '@/store/usePlayerStore';
+import { usePlayerStore, type Track as PlayerTrack } from '@/store/usePlayerStore';
 
 interface Playlist {
   id: string;
@@ -42,8 +35,10 @@ export default function PlaylistsPage() {
   const [newPlaylistDescription, setNewPlaylistDescription] = useState('');
   const [isPublic, setIsPublic] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
+  const [isGeneratingMix, setIsGeneratingMix] = useState(false);
+  const [mixMessage, setMixMessage] = useState<string | null>(null);
   const { user, isAuthenticated } = useAuthStore();
-  const { } = usePlayerStore();
+  const setQueue = usePlayerStore((state) => state.setQueue);
 
   useEffect(() => {
     fetchPlaylists();
@@ -126,11 +121,67 @@ export default function PlaylistsPage() {
   };
 
   const playPlaylist = (playlist: Playlist) => {
-    if (playlist.tracks && playlist.tracks.length > 0) {
-      // Store playlist in localStorage for the player
-      localStorage.setItem('currentPlaylist', JSON.stringify(playlist.tracks));
-      // Trigger a custom event for the player to pick up
-      window.dispatchEvent(new CustomEvent('playlistChanged', { detail: playlist.tracks }));
+    if (!playlist.tracks || playlist.tracks.length === 0) return;
+    localStorage.setItem('currentPlaylist', JSON.stringify(playlist.tracks));
+    setQueue(playlist.tracks as PlayerTrack[], 0, {
+      autoplay: true,
+      contextName: playlist.name,
+    });
+  };
+
+  const generateMix = async () => {
+    if (!isAuthenticated) return;
+    setIsGeneratingMix(true);
+    setMixMessage(null);
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/social/playlists/auto', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ includeFollowing: true, randomize: true, limit: 30 }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Unable to generate your mix');
+      }
+
+      const mixTracks: PlayerTrack[] = data.playlist?.tracks || [];
+      if (mixTracks.length === 0) {
+        setMixMessage('No tracks matched your preferences yet. Try following a few artists first.');
+        return;
+      }
+
+      // Persist the mix as a normal playlist so it stays available after a reload.
+      const saveResponse = await fetch('/api/social/playlists', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: data.playlist.name,
+          description: data.playlist.description,
+          isPublic: false,
+          trackIds: mixTracks.map((track) => track.id),
+        }),
+      });
+      const saved = await saveResponse.json();
+      if (saveResponse.ok && saved.playlist) {
+        setPlaylists((current) => [
+          { ...saved.playlist, tracks: mixTracks, tracksCount: mixTracks.length },
+          ...current,
+        ]);
+      }
+
+      setQueue(mixTracks, 0, { autoplay: true, contextName: data.playlist.name });
+      setMixMessage(`Your mix is ready with ${mixTracks.length} tracks and is now playing.`);
+    } catch (error) {
+      setMixMessage(error instanceof Error ? error.message : 'Unable to generate your mix');
+    } finally {
+      setIsGeneratingMix(false);
     }
   };
 
@@ -243,6 +294,24 @@ export default function PlaylistsPage() {
             </div>
           )}
 
+          {mixMessage && (
+            <div
+              role="status"
+              className="mb-4 flex items-start gap-2 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm"
+            >
+              <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+              <span className="flex-1">{mixMessage}</span>
+              <button
+                type="button"
+                onClick={() => setMixMessage(null)}
+                aria-label="Dismiss message"
+                className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+
           {/* Playlists Grid */}
           {playlists.length === 0 ? (
             <div className="text-center py-16 bg-card rounded-xl">
@@ -267,32 +336,19 @@ export default function PlaylistsPage() {
               {/* Generate Auto Playlist Card */}
               {isAuthenticated && (
                 <button
-                  onClick={() => {
-                    // Trigger auto playlist generation
-                    const token = localStorage.getItem('token');
-                    fetch('/api/social/playlists/auto', {
-                      method: 'POST',
-                      headers: {
-                        'Content-Type': 'application/json',
-                        Authorization: `Bearer ${token}`,
-                      },
-                      body: JSON.stringify({
-                        includeFollowing: true,
-                        randomize: true,
-                        limit: 30,
-                      }),
-                    }).then(res => res.json()).then(data => {
-                      if (data.success) {
-                        // Add to playlists
-                        fetchPlaylists();
-                      }
-                    });
-                  }}
-                  className="bg-gradient-to-br from-primary/20 via-accent/20 to-primary/20 border-2 border-dashed border-primary/30 rounded-xl p-6 flex flex-col items-center justify-center gap-3 hover:border-primary/50 transition-colors text-left w-full"
+                  onClick={() => void generateMix()}
+                  disabled={isGeneratingMix}
+                  className="bg-gradient-to-br from-primary/20 via-accent/20 to-primary/20 border-2 border-dashed border-primary/30 rounded-xl p-6 flex flex-col items-center justify-center gap-3 hover:border-primary/50 transition-colors text-left w-full disabled:opacity-60"
                 >
-                  <Sparkles className="h-10 w-10 text-primary" />
+                  {isGeneratingMix ? (
+                    <Loader2 className="h-10 w-10 animate-spin text-primary" />
+                  ) : (
+                    <Sparkles className="h-10 w-10 text-primary" />
+                  )}
                   <div>
-                    <h3 className="font-semibold">Generate Mix</h3>
+                    <h3 className="font-semibold">
+                      {isGeneratingMix ? 'Building your mix…' : 'Generate Mix'}
+                    </h3>
                     <p className="text-sm text-muted-foreground">
                       Personalized playlist based on your preferences
                     </p>

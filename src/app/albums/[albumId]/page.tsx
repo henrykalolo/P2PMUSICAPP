@@ -3,8 +3,10 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Disc3 } from 'lucide-react';
+import { Disc3, Play } from 'lucide-react';
 import { EnhancedFeedItem } from '@/components/feed/EnhancedFeedItem';
+import { Button } from '@/components/ui/button';
+import { usePlayerStore, type Track as PlayerTrack } from '@/store/usePlayerStore';
 
 interface AlbumTrack {
   id: string;
@@ -28,6 +30,7 @@ export default function AlbumDetailPage() {
   const [tracks, setTracks] = useState<AlbumTrack[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const setQueue = usePlayerStore((state) => state.setQueue);
 
   useEffect(() => {
     const load = async () => {
@@ -70,6 +73,21 @@ export default function AlbumDetailPage() {
                 {album.releaseDate && <p className="mt-1 text-xs text-muted-foreground">Released {album.releaseDate}</p>}
                 {album.description && <p className="mt-2 text-sm">{album.description}</p>}
                 <p className="mt-2 text-xs text-muted-foreground">{tracks.length} tracks</p>
+                {tracks.length > 0 && (
+                  <Button
+                    size="sm"
+                    className="mt-3"
+                    onClick={() =>
+                      setQueue(tracks as PlayerTrack[], 0, {
+                        autoplay: true,
+                        contextName: album.title,
+                      })
+                    }
+                  >
+                    <Play className="mr-2 h-4 w-4" />
+                    Play release
+                  </Button>
+                )}
               </div>
             </section>
 
@@ -79,7 +97,14 @@ export default function AlbumDetailPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                {tracks.map((track) => <EnhancedFeedItem key={track.id} post={track} />)}
+                {tracks.map((track) => (
+                  <EnhancedFeedItem
+                    key={track.id}
+                    post={track}
+                    queue={tracks as PlayerTrack[]}
+                    queueContext={album.title}
+                  />
+                ))}
               </div>
             )}
           </>

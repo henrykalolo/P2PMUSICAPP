@@ -12,10 +12,11 @@ const notificationIcons = {
   comment: MessageCircle,
   mention: AtSign,
   repost: Repeat,
+  message: MessageCircle,
   system: Info
 };
 
-type FilterType = 'all' | 'unread' | 'follow' | 'like' | 'comment';
+type FilterType = 'all' | 'unread' | 'follow' | 'like' | 'comment' | 'message';
 
 export default function NotificationsPage() {
   const { 
@@ -52,6 +53,7 @@ export default function NotificationsPage() {
 
   const getNotificationLink = (notification: any) => {
     const { data } = notification;
+    if (data.conversationId) return `/messages?conversationId=${data.conversationId}`;
     if (data.postId) return `/post/${data.postId}`;
     if (data.userId) return `/user/${data.userId}`;
     return '#';
@@ -65,7 +67,7 @@ export default function NotificationsPage() {
         <div className="max-w-2xl mx-auto">
           {/* Filters */}
           <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-            {(['all', 'unread', 'follow', 'like', 'comment'] as FilterType[]).map((f) => (
+            {(['all', 'unread', 'follow', 'like', 'comment', 'message'] as FilterType[]).map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
@@ -120,6 +122,7 @@ export default function NotificationsPage() {
                         notification.type === 'comment' ? 'bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-300' :
                         notification.type === 'mention' ? 'bg-purple-100 text-purple-600 dark:bg-purple-900 dark:text-purple-300' :
                         notification.type === 'repost' ? 'bg-orange-100 text-orange-600 dark:bg-orange-900 dark:text-orange-300' :
+                        notification.type === 'message' ? 'bg-indigo-100 text-indigo-600 dark:bg-indigo-900 dark:text-indigo-300' :
                         'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300'
                       }`}>
                         <Icon className="h-5 w-5" />
@@ -129,6 +132,14 @@ export default function NotificationsPage() {
                           <div>
                             <p className="font-semibold">{notification.title}</p>
                             <p className="text-muted-foreground mt-1">{notification.message}</p>
+                            {notification.type === 'message' && notification.data?.conversationId && (
+                              <Link
+                                href={`/messages?conversationId=${notification.data.conversationId}`}
+                                className="mt-2 inline-block text-sm text-primary hover:underline"
+                              >
+                                Open conversation
+                              </Link>
+                            )}
                             <p className="text-sm text-muted-foreground mt-2">
                               {formatTime(notification.createdAt)}
                             </p>

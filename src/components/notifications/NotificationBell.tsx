@@ -11,6 +11,7 @@ const notificationIcons = {
   comment: MessageCircle,
   mention: AtSign,
   repost: Repeat,
+  message: MessageCircle,
   system: Info
 };
 
@@ -56,6 +57,7 @@ export default function NotificationBell() {
 
   const getNotificationLink = (notification: any) => {
     const { data } = notification;
+    if (data.conversationId) return `/messages?conversationId=${data.conversationId}`;
     if (data.postId) return `/post/${data.postId}`;
     if (data.userId) return `/user/${data.userId}`;
     return '/notifications';
@@ -124,6 +126,7 @@ export default function NotificationBell() {
                           notification.type === 'comment' ? 'bg-green-100 text-green-600' :
                           notification.type === 'mention' ? 'bg-purple-100 text-purple-600' :
                           notification.type === 'repost' ? 'bg-orange-100 text-orange-600' :
+                          notification.type === 'message' ? 'bg-indigo-100 text-indigo-600' :
                           'bg-gray-100 text-gray-600'
                         }`}>
                           <Icon className="h-4 w-4" />

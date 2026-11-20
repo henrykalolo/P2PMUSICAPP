@@ -117,7 +117,7 @@ export default function UploadPage() {
         <div className="max-w-md mx-auto">
           <h1 className="text-2xl font-bold mb-2">Upload Music</h1>
           <p className="text-muted-foreground mb-6">
-            Share your music. Files are encrypted at rest on the server and ready to play immediately.
+            Share a single track or drop a whole album at once. Files are encrypted at rest on the server and ready to play immediately.
           </p>
 
           <UploadComponent onUploadComplete={handleUploadComplete} />
@@ -125,8 +125,9 @@ export default function UploadPage() {
           <div className="mt-8 p-4 bg-muted rounded-lg">
             <h3 className="font-semibold mb-2">Supported Formats</h3>
             <ul className="text-sm text-muted-foreground space-y-1">
-              <li>• MP3, OGG, WAV, FLAC, M4A</li>
-              <li>• Maximum file size: 100MB</li>
+              <li>• MP3, OGG, WAV, FLAC, M4A, MP4, AAC</li>
+              <li>• Maximum file size: 100MB per track, 30 tracks per batch</li>
+              <li>• Multi-file uploads can be attached to a new or existing release</li>
               <li>• Files are encrypted before upload</li>
             </ul>
           </div>

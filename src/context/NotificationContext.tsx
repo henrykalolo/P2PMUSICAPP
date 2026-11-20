@@ -4,7 +4,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback, use
 
 export interface Notification {
   id: string;
-  type: 'follow' | 'like' | 'comment' | 'mention' | 'repost' | 'system';
+  type: 'follow' | 'like' | 'comment' | 'mention' | 'repost' | 'message' | 'system';
   title: string;
   message: string;
   data: Record<string, any>;

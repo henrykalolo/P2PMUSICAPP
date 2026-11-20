@@ -5,8 +5,9 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { EnhancedFeedItem } from '@/components/feed/EnhancedFeedItem';
 import { RepostItem } from '@/components/feed/RepostItem';
-import { Music, Upload, User, LogOut, LogIn, UserPlus } from 'lucide-react';
+import { Music, Sparkles, Upload, User, Play } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
+import { usePlayerStore, type Track as PlayerTrack } from '@/store/usePlayerStore';
 
 interface Track {
   id: string;
@@ -60,7 +61,15 @@ export default function FeedPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<FeedMode>('for-you');
+  const [mix, setMix] = useState<{
+    name: string;
+    description: string;
+    tracks: Track[];
+  } | null>(null);
   const { user, isAuthenticated, setUser, setAuthenticated, setLoading } = useAuthStore();
+  const setQueue = usePlayerStore((state) => state.setQueue);
+  const setIsPlaying = usePlayerStore((state) => state.setIsPlaying);
+  const currentTrack = usePlayerStore((state) => state.currentTrack);
 
   useEffect(() => {
     // Check authentication status
@@ -90,6 +99,35 @@ export default function FeedPage() {
       setLoading(false);
     }
   }, [setUser, setAuthenticated, setLoading]);
+
+  // A personalized mix generated on Discover is handed over through localStorage.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('playlist') !== 'auto') return;
+    try {
+      const raw = window.localStorage.getItem('autoPlaylist');
+      if (!raw) return;
+      const stored = JSON.parse(raw) as {
+        name?: string;
+        description?: string;
+        tracks?: Track[];
+      };
+      const mixTracks = (stored.tracks || []).filter((track) => track?.id && track?.title);
+      if (mixTracks.length === 0) return;
+      const nextMix = {
+        name: stored.name || 'Discover Mix',
+        description: stored.description || 'A personalized mix based on your preferences',
+        tracks: mixTracks,
+      };
+      setMix(nextMix);
+      setQueue(mixTracks as PlayerTrack[], 0, {
+        autoplay: false,
+        contextName: nextMix.name,
+      });
+    } catch {
+      // A malformed/stale mix should never break the feed.
+    }
+  }, [setQueue]);
 
   const fetchFeedData = async (feedMode: FeedMode = mode) => {
     setIsLoading(true);
@@ -146,33 +184,55 @@ export default function FeedPage() {
     window.location.href = '/';
   };
 
-  // Combine tracks and reposts for feed display
+  // Combine tracks and reposts for feed display. For You keeps the server's
+  // ranking; Latest/Following remain chronological.
+  const timestamp = (value: string) => {
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const orderedTracks = mode === 'for-you'
+    ? tracks
+    : [...tracks].sort((a, b) => timestamp(b.createdAt) - timestamp(a.createdAt));
+
   const feedItems: Array<{
     type: 'track' | 'repost';
     data: Track | Repost;
     createdAt: string;
-  }> = [];
-  
-  // Add tracks with type indicator
-  tracks.forEach(track => {
-    feedItems.push({
-      type: 'track',
-      data: track,
-      createdAt: track.createdAt
+  }> = orderedTracks.map((track) => ({
+    type: 'track',
+    data: track,
+    createdAt: track.createdAt,
+  }));
+
+  const orderedReposts = [...reposts].sort(
+    (a, b) => timestamp(b.createdAt) - timestamp(a.createdAt)
+  );
+
+  if (mode === 'for-you') {
+    // Interleave reposts by date without reordering the ranked tracks.
+    orderedReposts.forEach((repost) => {
+      const entry = {
+        type: 'repost' as const,
+        data: repost,
+        createdAt: repost.createdAt,
+      };
+      const insertAt = feedItems.findIndex(
+        (item) => item.type === 'track' && timestamp(item.createdAt) <= timestamp(repost.createdAt)
+      );
+      if (insertAt === -1) feedItems.push(entry);
+      else feedItems.splice(insertAt, 0, entry);
     });
-  });
-  
-  // Add reposts with type indicator
-  reposts.forEach(repost => {
-    feedItems.push({
-      type: 'repost',
-      data: repost,
-      createdAt: repost.createdAt
+  } else {
+    orderedReposts.forEach((repost) => {
+      feedItems.push({
+        type: 'repost',
+        data: repost,
+        createdAt: repost.createdAt,
+      });
     });
-  });
-  
-  // Sort feed items by date (newest first)
-  feedItems.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    feedItems.sort((a, b) => timestamp(b.createdAt) - timestamp(a.createdAt));
+  }
 
   if (isLoading) {
     return (
@@ -238,6 +298,51 @@ export default function FeedPage() {
               </div>
             </div>
 
+            {mix && mix.tracks.length > 0 && (
+              <section className="space-y-4 rounded-2xl border border-primary/30 bg-gradient-to-br from-primary/10 via-accent/5 to-primary/10 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <h2 className="flex items-center gap-2 text-xl font-bold">
+                      <Sparkles className="h-5 w-5 text-primary" />
+                      {mix.name}
+                    </h2>
+                    <p className="text-sm text-muted-foreground">
+                      {mix.description} · {mix.tracks.length} tracks
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      const isCurrentMix =
+                        currentTrack &&
+                        mix.tracks.some((track) => track.id === currentTrack.id);
+                      if (isCurrentMix) {
+                        setIsPlaying(true);
+                      } else {
+                        setQueue(mix.tracks as PlayerTrack[], 0, {
+                          autoplay: true,
+                          contextName: mix.name,
+                        });
+                      }
+                    }}
+                  >
+                    <Play className="mr-2 h-4 w-4" />
+                    Play Mix
+                  </Button>
+                </div>
+                <div className="space-y-3">
+                  {mix.tracks.slice(0, 10).map((track) => (
+                    <EnhancedFeedItem
+                      key={`mix-${track.id}`}
+                      post={track}
+                      queue={mix.tracks as PlayerTrack[]}
+                      queueContext={mix.name}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+
             {error ? (
               <div className="text-center py-12">
                 <p className="text-muted-foreground mb-4">{error}</p>
@@ -262,7 +367,12 @@ export default function FeedPage() {
                 {feedItems.map((item, index) => (
                   <div key={`${item.type}-${item.data.id}-${index}`}>
                     {item.type === 'track' ? (
-                      <EnhancedFeedItem key={item.data.id} post={item.data as Track} />
+                      <EnhancedFeedItem
+                        key={item.data.id}
+                        post={item.data as Track}
+                        queue={tracks as PlayerTrack[]}
+                        queueContext="Your Feed"
+                      />
                     ) : (
                       <RepostItem key={item.data.id} repost={item.data as Repost} />
                     )}

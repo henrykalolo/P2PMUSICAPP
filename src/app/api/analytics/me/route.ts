@@ -36,6 +36,7 @@ export async function GET(request: NextRequest) {
            (SELECT COUNT(*)::int FROM comments c JOIN posts cp ON cp.id = c.post_id WHERE cp.author_id = $1) AS comments,
            (SELECT COUNT(*)::int FROM follows f WHERE f.following_id = $1) AS followers,
            (SELECT COUNT(*)::int FROM follows f WHERE f.follower_id = $1) AS following,
+           (SELECT COUNT(*)::int FROM play_events pe JOIN posts ep ON ep.id = pe.post_id WHERE ep.author_id = $1 AND pe.event_type = 'play') AS play_events,
            (SELECT COUNT(*)::int FROM play_events pe JOIN posts ep ON ep.id = pe.post_id WHERE ep.author_id = $1 AND pe.event_type = 'complete') AS completions,
            (SELECT COUNT(*)::int FROM play_events pe JOIN posts ep ON ep.id = pe.post_id WHERE ep.author_id = $1 AND pe.event_type = 'skip') AS skips
          FROM posts p
@@ -57,6 +58,7 @@ export async function GET(request: NextRequest) {
         `SELECT p.id, p.title, p.cover_art_url, p.play_count,
                 (SELECT COUNT(*)::int FROM likes l WHERE l.post_id = p.id) AS likes,
                 (SELECT COUNT(*)::int FROM comments c WHERE c.post_id = p.id) AS comments,
+                (SELECT COUNT(*)::int FROM play_events pe WHERE pe.post_id = p.id AND pe.event_type = 'play') AS play_events,
                 (SELECT COUNT(*)::int FROM play_events pe WHERE pe.post_id = p.id AND pe.event_type = 'complete') AS completions,
                 (SELECT COUNT(*)::int FROM play_events pe WHERE pe.post_id = p.id AND pe.event_type = 'skip') AS skips
          FROM posts p
@@ -69,6 +71,7 @@ export async function GET(request: NextRequest) {
 
     const summary = summaryResult.rows[0] as Record<string, unknown> | undefined;
     const plays = numberOrZero(summary?.plays);
+    const playEvents = numberOrZero(summary?.play_events);
     const completions = numberOrZero(summary?.completions);
     const skips = numberOrZero(summary?.skips);
 
@@ -84,8 +87,9 @@ export async function GET(request: NextRequest) {
           comments: numberOrZero(summary?.comments),
           followers: numberOrZero(summary?.followers),
           following: numberOrZero(summary?.following),
-          completionRate: rate(completions, plays),
-          skipRate: rate(skips, plays),
+          playEvents,
+          completionRate: rate(completions, playEvents),
+          skipRate: rate(skips, playEvents),
         },
         playsLast14Days: seriesResult.rows.map((row: Record<string, any>) => ({
           date: row.day,
@@ -98,8 +102,8 @@ export async function GET(request: NextRequest) {
           plays: numberOrZero(row.play_count),
           likes: numberOrZero(row.likes),
           comments: numberOrZero(row.comments),
-          completionRate: rate(numberOrZero(row.completions), numberOrZero(row.play_count)),
-          skipRate: rate(numberOrZero(row.skips), numberOrZero(row.play_count)),
+          completionRate: rate(numberOrZero(row.completions), numberOrZero(row.play_events)),
+          skipRate: rate(numberOrZero(row.skips), numberOrZero(row.play_events)),
         })),
       },
     });

@@ -307,7 +307,9 @@ export default function PostPage({ params }: { params: Promise<{ postId: string 
                 src={post.streamUrl}
                 title={post.title}
                 artist={post.artist}
+                album={post.album}
                 poster={post.coverArtUrl}
+                duration={post.duration}
               />
             </div>
 

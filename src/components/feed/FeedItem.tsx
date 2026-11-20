@@ -121,7 +121,9 @@ export const FeedItem: React.FC<FeedItemProps> = ({ post }) => {
           src={post.streamUrl}
           title={post.title}
           artist={post.artist}
+          album={post.album}
           poster={post.coverArtUrl}
+          duration={post.duration}
         />
       </div>
 

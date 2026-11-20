@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react';
 import Navbar from '@/components/ui/Navbar';
+import { GlobalAudioPlayer } from '@/components/player/GlobalAudioPlayer';
 import NavigationSidebar from '@/components/layout/NavigationSidebar';
 import {
   LeftSidebarExtras,
@@ -224,6 +225,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       <MobileDrawer side="left" open={primaryOpen} onClose={() => setPrimaryOpen(false)} />
       <MobileDrawer side="right" open={secondaryOpen} onClose={() => setSecondaryOpen(false)} />
       <MobileBottomNav />
+      <GlobalAudioPlayer />
     </div>
   );
 }

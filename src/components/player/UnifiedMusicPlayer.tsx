@@ -1,27 +1,34 @@
 'use client';
 
 /**
- * Server-authoritative audio player.
+ * Player controls for a single track.
  *
- * Playback always uses an authorized, range-capable /api/media URL so seeking
- * and instant readiness work for every uploaded track. P2P/IPFS remains an
- * optional redirect handled by the API, never a client-side dependency.
+ * Audio itself lives in the app-wide GlobalAudioPlayer so playlists and mixes
+ * keep advancing between pages and never produce overlapping streams.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { AlertTriangle, Loader2, Pause, Play, SkipBack, SkipForward, Volume2 } from 'lucide-react';
-import { usePlayerStore } from '@/store/usePlayerStore';
+import { usePlayerStore, type Track } from '@/store/usePlayerStore';
+import { reportPlayEvent } from '@/lib/media/play-telemetry';
 
 interface UnifiedMusicPlayerProps {
   /** Track UUID from the posts table. */
   trackId: string;
-  /** Signed playback URL returned by /api/tracks. Optional. */
+  /** Signed playback URL returned by the API. Fallback for the global engine. */
   src?: string | null;
   mimeType?: string;
   title?: string;
   artist?: string;
+  album?: string;
   poster?: string;
+  /** Known track length (seconds) used before metadata loads. */
+  duration?: number;
+  /** When provided, pressing play starts a continuous queue at this track. */
+  queue?: Track[];
+  /** Label shown for the active queue (playlist, mix, album...). */
+  queueContext?: string;
   /** Compact variant for feed cards; hides duplicated artwork and metadata. */
   variant?: 'default' | 'minimal';
   /** Kept for backwards compatibility with older feed props; unused. */
@@ -30,24 +37,11 @@ interface UnifiedMusicPlayerProps {
   serverStorageId?: string;
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
   return `${mins}:${secs.toString().padStart(2, '0')}`;
-}
-
-function createEventId(): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
-    const random = Math.floor(Math.random() * 16);
-    const value = char === 'x' ? random : (random & 0x3) | 0x8;
-    return value.toString(16);
-  });
 }
 
 interface WaveformProgressProps {
@@ -192,204 +186,148 @@ export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
   src,
   title = 'Unknown Track',
   artist = 'Unknown Artist',
+  album = '',
   poster,
+  duration: knownDuration = 0,
+  queue,
+  queueContext,
   variant = 'default',
 }) => {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const [mediaUrl, setMediaUrl] = useState<string | null>(src || null);
-  const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(
-    src ? 'loading' : 'idle'
+  const currentTrack = usePlayerStore((state) => state.currentTrack);
+  const isPlaying = usePlayerStore((state) => state.isPlaying);
+  const currentTime = usePlayerStore((state) => state.currentTime);
+  const storeDuration = usePlayerStore((state) => state.duration);
+  const progress = usePlayerStore((state) => state.progress);
+  const volume = usePlayerStore((state) => state.volume);
+  const isBuffering = usePlayerStore((state) => state.isBuffering);
+  const error = usePlayerStore((state) => state.error);
+  const contextName = usePlayerStore((state) => state.contextName);
+  const setIsPlaying = usePlayerStore((state) => state.setIsPlaying);
+  const setVolume = usePlayerStore((state) => state.setVolume);
+  const setQueue = usePlayerStore((state) => state.setQueue);
+  const playTrack = usePlayerStore((state) => state.playTrack);
+  const requestSeek = usePlayerStore((state) => state.requestSeek);
+  const retryPlayback = usePlayerStore((state) => state.retryPlayback);
+  const playPrevious = usePlayerStore((state) => state.playPrevious);
+  const playNext = usePlayerStore((state) => state.playNext);
+
+  const isActive = currentTrack?.id === trackId;
+  const playing = isActive && isPlaying;
+  const trackDuration = isActive && storeDuration > 0 ? storeDuration : knownDuration;
+  const displayTime = isActive ? currentTime : 0;
+  const displayProgress = isActive ? progress : 0;
+  const showError = isActive && Boolean(error);
+  const showBuffering = isActive && isBuffering && !error;
+
+  const track: Track = useMemo(
+    () => ({
+      id: trackId,
+      title,
+      artist,
+      album,
+      duration: knownDuration || 0,
+      streamUrl: src || undefined,
+      coverArtUrl: poster,
+    }),
+    [trackId, title, artist, album, knownDuration, src, poster]
   );
-  const [error, setError] = useState<string | null>(null);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
-  const [buffered, setBuffered] = useState(0);
-  const retriedRef = useRef(false);
-  const playReportedRef = useRef(false);
 
-  const { isPlaying, volume, setIsPlaying, setVolume } = usePlayerStore();
-
-  const reportEvent = useCallback(
-    (eventType: 'play' | 'complete' | 'skip', progress: number, total: number) => {
-      const token = localStorage.getItem('token');
-      if (!token || !UUID_RE.test(trackId)) return;
-      void fetch(`/api/tracks/${encodeURIComponent(trackId)}/play`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          eventType,
-          eventId: createEventId(),
-          progressSeconds: Math.max(0, Math.floor(progress || 0)),
-          durationSeconds: Math.max(0, Math.floor(total || 0)),
-        }),
-      }).catch(() => {
-        // Telemetry must never interrupt playback.
-      });
-    },
-    [trackId]
-  );
-
-  // Resolve a short-lived playback URL when one was not supplied by the API.
-  useEffect(() => {
-    retriedRef.current = false;
-    playReportedRef.current = false;
-    if (src) {
-      setMediaUrl(src);
-      setStatus('loading');
-      setError(null);
+  const handlePlayPause = () => {
+    if (playing) {
+      setIsPlaying(false);
       return;
     }
-    if (!UUID_RE.test(trackId)) {
-      setError('This track has no playable media source.');
-      setStatus('error');
+    if (isActive) {
+      setIsPlaying(true);
       return;
     }
-
-    const controller = new AbortController();
-    setStatus('loading');
-    setError(null);
-
-    fetch(`/api/media/token?trackId=${encodeURIComponent(trackId)}`, {
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error('Playback authorization failed');
-        return response.json() as Promise<{ url: string }>;
-      })
-      .then((data) => {
-        if (typeof data.url !== 'string' || !data.url.startsWith('/api/media/')) {
-          throw new Error('Invalid playback URL');
-        }
-        setMediaUrl(data.url);
-      })
-      .catch((err: unknown) => {
-        if (err instanceof DOMException && err.name === 'AbortError') return;
-        setError(err instanceof Error ? err.message : 'Unable to load track');
-        setStatus('error');
-      });
-
-    return () => controller.abort();
-  }, [src, trackId]);
-
-  useEffect(() => {
-    if (audioRef.current) audioRef.current.volume = volume;
-  }, [volume, mediaUrl]);
-
-  const handlePlayPause = async () => {
-    const audio = audioRef.current;
-    if (!audio || status === 'error') return;
-    if (audio.paused) {
-      try {
-        await audio.play();
-      } catch {
-        setError('Playback was blocked. Try again after interacting with the page.');
-      }
-    } else {
-      audio.pause();
+    if (queue && queue.length > 0) {
+      const merged = queue.map((item) =>
+        item.id === trackId ? { ...item, ...track, streamUrl: item.streamUrl || track.streamUrl } : item
+      );
+      const index = Math.max(
+        0,
+        merged.findIndex((item) => item.id === trackId)
+      );
+      setQueue(merged, index, { autoplay: true, contextName: queueContext });
+      return;
     }
-  };
-
-  const handleSkip = (delta: number) => {
-    const audio = audioRef.current;
-    if (!audio || !Number.isFinite(audio.duration)) return;
-    const from = audio.currentTime;
-    audio.currentTime = Math.min(Math.max(0, from + delta), audio.duration);
-    if (delta > 0) reportEvent('skip', from, audio.duration);
+    playTrack(track, { contextName: queueContext });
   };
 
   const handleSeek = (value: number) => {
-    const audio = audioRef.current;
-    if (!audio || !Number.isFinite(audio.duration)) return;
-    audio.currentTime = (value / 100) * audio.duration;
-    setCurrentTime(audio.currentTime);
+    if (!isActive || !trackDuration) return;
+    requestSeek((value / 100) * trackDuration);
   };
 
-  const handleVolume = (value: number) => {
-    setVolume(value);
-    if (audioRef.current) audioRef.current.volume = value;
-  };
-
-  const handleProgress = () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
-    setCurrentTime(audio.currentTime);
-    if (audio.buffered.length > 0) {
-      setBuffered((audio.buffered.end(audio.buffered.length - 1) / audio.duration) * 100);
+  const handleSkip = (delta: number) => {
+    if (!isActive || !trackDuration) return;
+    const from = currentTime;
+    const to = Math.min(Math.max(0, from + delta), trackDuration);
+    if (delta > 0) {
+      reportPlayEvent('skip', trackId, from, trackDuration, currentTrack?.streamUrl);
     }
+    requestSeek(to);
   };
 
-  // A feed URL can outlive its one-hour token. Refresh once on playback failure.
-  const refreshPlaybackUrl = async () => {
-    if (retriedRef.current || !UUID_RE.test(trackId)) {
-      setError('This track could not be played. It may have been removed.');
-      setStatus('error');
-      setIsPlaying(false);
+  const handlePrevious = () => {
+    if (!isActive) {
+      handlePlayPause();
       return;
     }
-    retriedRef.current = true;
-    setStatus('loading');
-    setError(null);
-    try {
-      const response = await fetch(`/api/media/token?trackId=${encodeURIComponent(trackId)}`);
-      if (!response.ok) throw new Error('Playback authorization failed');
-      const data = (await response.json()) as { url?: unknown };
-      if (typeof data.url !== 'string' || !data.url.startsWith('/api/media/')) {
-        throw new Error('Invalid playback URL');
-      }
-      setMediaUrl(data.url);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to load track');
-      setStatus('error');
-      setIsPlaying(false);
+    if (currentTime > 3) {
+      requestSeek(0);
+      return;
     }
+    playPrevious();
   };
 
-  const ready = status === 'ready';
-  const progress = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
+  const handleNext = () => {
+    if (!isActive) {
+      handlePlayPause();
+      return;
+    }
+    reportPlayEvent('skip', trackId, currentTime, trackDuration, currentTrack?.streamUrl);
+    playNext();
+  };
 
-  const audioElement = mediaUrl ? (
-    <audio
-      ref={audioRef}
-      src={mediaUrl}
-      preload="metadata"
-      onLoadedMetadata={(event) => {
-        setDuration(event.currentTarget.duration || 0);
-        setStatus('ready');
-      }}
-      onCanPlay={() => setStatus('ready')}
-      onTimeUpdate={handleProgress}
-      onProgress={handleProgress}
-      onPlay={(event) => {
-        setIsPlaying(true);
-        if (!playReportedRef.current) {
-          playReportedRef.current = true;
-          reportEvent('play', event.currentTarget.currentTime, event.currentTarget.duration || 0);
-        }
-      }}
-      onPause={() => setIsPlaying(false)}
-      onEnded={(event) => {
-        setIsPlaying(false);
-        reportEvent('complete', event.currentTarget.duration || 0, event.currentTarget.duration || 0);
-        playReportedRef.current = false;
-      }}
-      onError={() => {
-        void refreshPlaybackUrl();
-      }}
-      className="hidden"
+  const waveform = (
+    <WaveformProgress
+      seed={trackId}
+      progress={displayProgress}
+      buffered={displayProgress}
+      currentTime={displayTime}
+      duration={trackDuration}
+      disabled={!trackDuration}
+      onSeek={handleSeek}
     />
-  ) : null;
+  );
+
+  const timeLabel = (
+    <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+      {formatTime(displayTime)} / {formatTime(trackDuration)}
+    </span>
+  );
+
+  const queueLabel =
+    isActive && contextName ? (
+      <span className="truncate text-[10px] uppercase tracking-wide text-primary">{contextName}</span>
+    ) : null;
 
   if (variant === 'minimal') {
     return (
       <div className="w-full" aria-label={`Player for ${title}`}>
-        {error ? (
+        {showError ? (
           <div className="flex items-center gap-2 rounded-md bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
             <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
             <span className="truncate">{error}</span>
+            <button
+              type="button"
+              onClick={retryPlayback}
+              className="ml-auto shrink-0 font-medium underline"
+            >
+              Retry
+            </button>
           </div>
         ) : (
           <div className="flex items-center gap-3">
@@ -397,35 +335,26 @@ export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
               type="button"
               size="icon"
               variant="secondary"
-              onClick={() => void handlePlayPause()}
-              disabled={!ready || !mediaUrl}
-              aria-label={isPlaying ? 'Pause' : 'Play'}
+              onClick={handlePlayPause}
+              aria-label={playing ? 'Pause' : 'Play'}
               className="h-8 w-8 shrink-0 rounded-full"
             >
-              {isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+              {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
             </Button>
 
             <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-muted/30 px-2 py-1.5">
-              <WaveformProgress
-                seed={trackId}
-                progress={progress}
-                buffered={Math.min(100, buffered)}
-                currentTime={currentTime}
-                duration={duration}
-                disabled={!ready}
-                onSeek={handleSeek}
-              />
+              {waveform}
               <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-                {formatTime(currentTime)} / {formatTime(duration)}
+                {formatTime(displayTime)} / {formatTime(trackDuration)}
               </span>
             </div>
 
-            {status === 'loading' && (
+            {showBuffering && (
               <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
             )}
           </div>
         )}
-        {audioElement}
+        {queueLabel && <div className="mt-1 pl-11">{queueLabel}</div>}
       </div>
     );
   }
@@ -441,32 +370,24 @@ export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold">{title}</p>
           <p className="truncate text-xs text-muted-foreground">{artist}</p>
+          {queueLabel}
         </div>
-        {status === 'loading' && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+        {showBuffering && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
       </div>
 
-      {error ? (
+      {showError ? (
         <div className="flex items-start gap-2 rounded bg-destructive/10 p-2 text-sm text-destructive">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{error}</span>
+          <span className="flex-1">{error}</span>
+          <button type="button" onClick={retryPlayback} className="font-medium underline">
+            Retry
+          </button>
         </div>
       ) : (
-        <>
-          <div className="flex items-center gap-3 rounded-xl bg-muted/30 px-3 py-2">
-            <WaveformProgress
-              seed={trackId}
-              progress={progress}
-              buffered={Math.min(100, buffered)}
-              currentTime={currentTime}
-              duration={duration}
-              disabled={!ready}
-              onSeek={handleSeek}
-            />
-            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
-              {formatTime(currentTime)} / {formatTime(duration)}
-            </span>
-          </div>
-        </>
+        <div className="flex items-center gap-3 rounded-xl bg-muted/30 px-3 py-2">
+          {waveform}
+          {timeLabel}
+        </div>
       )}
 
       <div className="mt-2 flex items-center gap-2">
@@ -474,30 +395,45 @@ export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
           type="button"
           variant="ghost"
           size="icon"
-          onClick={() => handleSkip(-10)}
-          disabled={!ready}
-          aria-label="Back 10 seconds"
+          onClick={handlePrevious}
+          aria-label="Previous track"
         >
           <SkipBack className="h-4 w-4" />
         </Button>
         <Button
           type="button"
           size="icon"
-          onClick={() => void handlePlayPause()}
-          disabled={!ready || !mediaUrl}
-          aria-label={isPlaying ? 'Pause' : 'Play'}
+          onClick={handlePlayPause}
+          aria-label={playing ? 'Pause' : 'Play'}
         >
-          {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+          {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={handleNext}
+          aria-label="Next track"
+        >
+          <SkipForward className="h-4 w-4" />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={() => handleSkip(-10)}
+          aria-label="Back 10 seconds"
+        >
+          <span className="text-[10px] font-semibold">-10</span>
         </Button>
         <Button
           type="button"
           variant="ghost"
           size="icon"
           onClick={() => handleSkip(10)}
-          disabled={!ready}
           aria-label="Forward 10 seconds"
         >
-          <SkipForward className="h-4 w-4" />
+          <span className="text-[10px] font-semibold">+10</span>
         </Button>
         <Volume2 className="ml-2 h-4 w-4 text-muted-foreground" />
         <input
@@ -506,13 +442,11 @@ export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
           max={1}
           step={0.01}
           value={volume}
-          onChange={(event) => handleVolume(Number(event.target.value))}
+          onChange={(event) => setVolume(Number(event.target.value))}
           aria-label="Volume"
           className="h-4 w-20 cursor-pointer"
         />
       </div>
-
-      {audioElement}
     </div>
   );
 };

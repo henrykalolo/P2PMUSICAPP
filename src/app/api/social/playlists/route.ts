@@ -194,12 +194,13 @@ export async function POST(request: NextRequest) {
       `, [playlistId, trackIds, positions]);
     }
 
+    const addedTracks = Array.isArray(trackIds) ? trackIds.length : 0;
     return NextResponse.json({
       success: true,
       playlist: {
         ...playlist,
         tracks: [],
-        tracksCount: 0,
+        tracksCount: addedTracks,
       },
     });
   } catch (error) {

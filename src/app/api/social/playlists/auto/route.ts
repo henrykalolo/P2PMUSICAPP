@@ -2,130 +2,93 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { verifyToken } from '@/lib/auth/jwt';
 import { createTrackStreamUrl } from '@/lib/media/signed-url';
+import {
+  buildAutoPlaylistFallbackQuery,
+  buildAutoPlaylistQuery,
+} from '@/lib/playlists/auto-playlist-query';
 
-// POST /api/social/playlists/auto - Generate auto-playlist based on preferences
+interface AutoPlaylistBody {
+  preferences?: unknown;
+  includeFollowing?: unknown;
+  randomize?: unknown;
+  limit?: unknown;
+}
+
+/** POST /api/social/playlists/auto - Generate a personalized mix. */
 export async function POST(request: NextRequest) {
   try {
     const authHeader = request.headers.get('authorization');
     if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json(
-        { error: 'Unauthorized' },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const token = authHeader.slice(7);
-    const payload = await verifyToken(token);
-
+    const payload = await verifyToken(authHeader.slice(7));
     if (!payload) {
-      return NextResponse.json(
-        { error: 'Invalid token' },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
     }
 
-    const { preferences, includeFollowing = true, randomize = true, limit = 20 } = await request.json();
+    const body = (await request.json().catch(() => ({}))) as AutoPlaylistBody;
+    const includeFollowing = body.includeFollowing !== false;
+    const randomize = body.randomize !== false;
+    const requestedLimit = Number(body.limit);
+    const limit = Number.isFinite(requestedLimit) ? requestedLimit : 20;
 
-    // Get user's music preferences
     let userPreferences: string[] = [];
-    if (preferences && Array.isArray(preferences)) {
-      userPreferences = preferences;
+    if (Array.isArray(body.preferences)) {
+      userPreferences = body.preferences
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        .map((value) => value.trim());
     } else {
       const prefResult = await query(
-        'SELECT preference_value FROM music_preferences WHERE user_id = $1',
+        `SELECT preference_value FROM music_preferences
+          WHERE user_id = $1 AND preference_type = 'genre'`,
         [payload.userId]
       );
-      userPreferences = prefResult.rows.map((row: any) => row.preference_value);
+      userPreferences = prefResult.rows
+        .map((row: Record<string, unknown>) => String(row.preference_value || '').trim())
+        .filter(Boolean);
     }
 
-    // Get users the current user follows
     let followingIds: string[] = [];
     if (includeFollowing) {
       const followingResult = await query(
         'SELECT following_id FROM follows WHERE follower_id = $1',
         [payload.userId]
       );
-      followingIds = followingResult.rows.map((row: any) => row.following_id);
+      followingIds = followingResult.rows
+        .map((row: Record<string, unknown>) => String(row.following_id || ''))
+        .filter(Boolean);
     }
 
-    // Build query for auto-generated playlist
-    let queryText = `
-      SELECT DISTINCT
-        p.id,
-        p.title,
-        p.artist,
-        p.album,
-        p.genre,
-        p.duration_seconds,
-        p.cover_art_url,
-        p.storage_type,
-        p.server_storage_id,
-        p.ipfs_cid,
-        p.created_at,
-        u.id as author_id,
-        u.username as author_username,
-        u.avatar_url as author_avatar,
-        COUNT(DISTINCT l.id) as likes_count,
-        COUNT(DISTINCT c.id) as comments_count
-      FROM posts p
-      JOIN users u ON p.author_id = u.id
-      LEFT JOIN likes l ON p.id = l.post_id
-      LEFT JOIN comments c ON p.id = c.post_id
-      WHERE 1=1
-    `;
+    const primary = buildAutoPlaylistQuery({
+      viewerId: payload.userId,
+      preferences: userPreferences,
+      followingIds,
+      limit,
+      randomize,
+    });
+    let result = await query(primary.sql, primary.params);
 
-    const queryParams: any[] = [];
-    let paramIndex = 1;
-
-    // Filter by preferences if available
-    if (userPreferences.length > 0) {
-      queryText += ` AND p.genre = ANY($${paramIndex++})`;
-      queryParams.push(userPreferences);
+    if (result.rows.length === 0 && (userPreferences.length > 0 || followingIds.length > 0)) {
+      const fallback = buildAutoPlaylistFallbackQuery(payload.userId, limit);
+      result = await query(fallback.sql, fallback.params);
     }
 
-    // Include tracks from followed users
-    if (followingIds.length > 0) {
-      queryText += ` AND p.author_id = ANY($${paramIndex++})`;
-      queryParams.push(followingIds);
-    }
-
-    // Exclude user's own posts (discover new content)
-    queryText += ` AND p.author_id != $${paramIndex++}`;
-    queryParams.push(payload.userId);
-
-    queryText += `
-      GROUP BY p.id, p.title, p.artist, p.album, p.genre, p.duration_seconds,
-               p.cover_art_url, p.storage_type, p.server_storage_id, p.ipfs_cid, p.created_at,
-               u.id, u.username, u.avatar_url
-    `;
-
-    // Order by recency or randomly
-    if (randomize) {
-      queryText += ` ORDER BY RANDOM()`;
-    } else {
-      queryText += ` ORDER BY p.created_at DESC`;
-    }
-
-    queryText += ` LIMIT $${paramIndex}`;
-    queryParams.push(limit);
-
-    const result = await query(queryText, queryParams);
-
-    const tracks = result.rows.map((row: any) => ({
+    const tracks = result.rows.map((row: Record<string, any>) => ({
       id: row.id,
       title: row.title,
       artist: row.artist,
       album: row.album,
       genre: row.genre,
-      duration: row.duration_seconds,
+      duration: Number(row.duration_seconds) || 0,
       coverArtUrl: row.cover_art_url,
       ipfsCid: row.ipfs_cid,
       storageType: row.storage_type,
       serverStorageId: row.server_storage_id,
       streamUrl: createTrackStreamUrl(row.id, row.storage_type, row.server_storage_id, row.ipfs_cid),
       createdAt: row.created_at,
-      likesCount: parseInt(row.likes_count),
-      commentsCount: parseInt(row.comments_count),
+      likesCount: parseInt(row.likes_count, 10) || 0,
+      commentsCount: parseInt(row.comments_count, 10) || 0,
       author: {
         id: row.author_id,
         username: row.author_username,
@@ -145,9 +108,6 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Auto playlist error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
