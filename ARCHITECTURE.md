@@ -43,6 +43,7 @@ PostgreSQL tables in `src/lib/db/schema.sql` are the single source of truth. All
 - AES-256-GCM provides authenticated encryption at rest, chunk-local so byte ranges remain efficient.
 - Storage identifiers are UUID-validated before being used as path components (no traversal).
 - Media responses use `Cache-Control: private` and `X-Content-Type-Options: nosniff`.
+- Background migration of server files to IPFS is disabled unless `ENABLE_P2P_MIGRATION=true`; IPFS remains a fallback, never an eviction mechanism.
 
 ## Known limitations
 

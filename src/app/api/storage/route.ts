@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth/jwt';
 import { parseRangeHeader, readMediaRange } from '@/lib/media/storage-reader';
+import { createPublicFileUrl, type PublicImageFileType } from '@/lib/storage/public-url';
 import {
   uploadFileWithBalancing,
   retrieveFileUnified,
   deleteFileUnified,
   checkUserQuota,
   getStorageStats,
-  checkAndBalanceStorage,
   FILE_TYPES,
 } from '@/lib/storage/unifiedStorage';
 
@@ -117,6 +117,13 @@ export async function POST(request: NextRequest) {
 
     if (result.storageType === 'server') {
       response.url = result.url;
+      if (fileType === 'avatar' || fileType === 'coverArt') {
+        response.url = createPublicFileUrl(
+          userId,
+          result.fileId,
+          fileType as PublicImageFileType
+        );
+      }
     } else {
       response.cid = result.cid;
       response.gatewayUrl = result.gatewayUrl;

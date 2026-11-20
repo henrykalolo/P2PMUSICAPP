@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Music, ArrowLeft, User, Upload, Save, X, Bell, Shield, Key, LogOut, Image as ImageIcon } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
+import { createPublicFileUrl, isAllowedImageUrl } from '@/lib/storage/public-url';
 
 interface UserProfile {
   id: string;
@@ -20,6 +21,57 @@ interface UserProfile {
 }
 
 type SettingsTab = 'profile' | 'account' | 'privacy' | 'notifications';
+
+function readFileAsDataUrl(file: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error('Could not read image'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Could not decode image'));
+    image.src = src;
+  });
+}
+
+/** Center-crop and downscale uploads so avatars stay small and consistent. */
+async function prepareAvatar(file: File): Promise<Blob> {
+  if (file.type === 'image/gif') return file;
+
+  const image = await loadImage(await readFileAsDataUrl(file));
+  const side = Math.min(image.width, image.height);
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 512;
+  const context = canvas.getContext('2d');
+  if (!context) return file;
+
+  context.drawImage(
+    image,
+    (image.width - side) / 2,
+    (image.height - side) / 2,
+    side,
+    side,
+    0,
+    0,
+    512,
+    512
+  );
+
+  return new Promise((resolve) => {
+    canvas.toBlob(
+      (blob) => resolve(blob || file),
+      file.type === 'image/webp' ? 'image/webp' : 'image/jpeg',
+      0.9
+    );
+  });
+}
 
 export default function ProfileSettingsPage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -55,12 +107,20 @@ export default function ProfileSettingsPage() {
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
+  const avatarObjectUrlRef = useRef<string | null>(null);
+
   const { user, setUser, setAuthenticated } = useAuthStore();
   const router = useRouter();
 
   useEffect(() => {
     fetchProfile();
+    const requestedTab = new URLSearchParams(window.location.search).get('tab');
+    if (requestedTab === 'account' || requestedTab === 'privacy' || requestedTab === 'notifications') {
+      setActiveTab(requestedTab);
+    }
+    return () => {
+      if (avatarObjectUrlRef.current) URL.revokeObjectURL(avatarObjectUrlRef.current);
+    };
   }, []);
 
   const fetchProfile = async () => {
@@ -99,17 +159,14 @@ export default function ProfileSettingsPage() {
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    e.target.value = '';
 
-    // Validate file type
     const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
     if (!allowedTypes.includes(file.type)) {
       setToast({ message: 'Invalid file type. Allowed: JPG, PNG, GIF, WebP', type: 'error' });
       return;
     }
-
-    // Validate file size (max 5MB)
-    const maxSize = 5 * 1024 * 1024;
-    if (file.size > maxSize) {
+    if (file.size > 5 * 1024 * 1024) {
       setToast({ message: 'File too large. Maximum size is 5MB', type: 'error' });
       return;
     }
@@ -122,37 +179,45 @@ export default function ProfileSettingsPage() {
         return;
       }
 
-      // Create preview
-      const previewUrl = URL.createObjectURL(file);
-      setAvatarPreview(previewUrl);
+      const prepared = await prepareAvatar(file);
+      if (prepared.size > 5 * 1024 * 1024) {
+        throw new Error('Processed image is still too large');
+      }
 
-      // Upload to server
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('fileType', 'avatar');
+      const previousPreview = avatarObjectUrlRef.current;
+      const previewUrl = URL.createObjectURL(prepared);
+      avatarObjectUrlRef.current = previewUrl;
+      setAvatarPreview(previewUrl);
+      if (previousPreview) URL.revokeObjectURL(previousPreview);
+
+      const uploadForm = new FormData();
+      const extension = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : file.type === 'image/gif' ? 'gif' : 'jpg';
+      uploadForm.append('file', prepared, `avatar.${extension}`);
+      uploadForm.append('fileType', 'avatar');
 
       const response = await fetch('/api/storage', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-        body: formData,
+        headers: { Authorization: `Bearer ${token}` },
+        body: uploadForm,
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Upload failed');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Avatar upload failed');
       }
 
-      const data = await response.json();
-
-      // Avatars are public profile data; use the public read-only route so <img>
-      // can load them without a Bearer header.
+      const uploadData = await response.json();
       const ownerId = profile?.id || user?.id;
-      if (!ownerId || !data.id) {
+      if (!ownerId || !uploadData.id) {
         throw new Error('Avatar upload response was incomplete');
       }
-      const avatarUrl = `/api/storage/public?userId=${encodeURIComponent(ownerId)}&id=${encodeURIComponent(data.id)}`;
+
+      // Prefer the canonical URL returned by the server; the fallback keeps
+      // older deployments working.
+      const avatarUrl =
+        typeof uploadData.url === 'string' && isAllowedImageUrl(uploadData.url)
+          ? uploadData.url
+          : createPublicFileUrl(ownerId, uploadData.id);
 
       const updateResponse = await fetch('/api/auth/update-profile', {
         method: 'PUT',
@@ -160,25 +225,23 @@ export default function ProfileSettingsPage() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          ...formData,
-          avatarUrl,
-        }),
+        body: JSON.stringify({ avatarUrl }),
       });
 
-      if (updateResponse.ok) {
-        const updateData = await updateResponse.json();
-        setProfile(updateData.user);
-        setUser(updateData.user);
-        setFormData(prev => ({ ...prev, avatarUrl: updateData.user.avatarUrl }));
-        setToast({ message: 'Avatar uploaded successfully!', type: 'success' });
-      } else {
-        throw new Error('Failed to update profile');
+      if (!updateResponse.ok) {
+        const updateError = await updateResponse.json().catch(() => ({}));
+        throw new Error(updateError.error || 'Failed to save avatar');
       }
+
+      const updateData = await updateResponse.json();
+      setProfile(updateData.user);
+      setUser(updateData.user);
+      setFormData(prev => ({ ...prev, avatarUrl: updateData.user.avatarUrl || '' }));
+      setAvatarPreview(updateData.user.avatarUrl || null);
+      setToast({ message: 'Avatar updated', type: 'success' });
     } catch (error) {
       console.error('Avatar upload error:', error);
       setToast({ message: error instanceof Error ? error.message : 'Failed to upload avatar', type: 'error' });
-      // Revert preview on error
       setAvatarPreview(profile?.avatarUrl || null);
     } finally {
       setIsUploadingAvatar(false);

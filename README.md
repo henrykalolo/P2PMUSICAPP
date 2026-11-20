@@ -65,6 +65,7 @@ Open http://localhost:3000.
 - `JWT_SECRET` and `ENCRYPTION_MASTER_KEY` are **required** and must be 64 hex characters each (`openssl rand -hex 32`). The app fails fast rather than using insecure defaults.
 - Losing `ENCRYPTION_MASTER_KEY` makes stored audio unrecoverable. Back it up securely.
 - `STORAGE_DIR` defaults to `./uploads`; mount persistent storage there in production.
+- `ENABLE_P2P_MIGRATION` is **off by default**. Leaving it off keeps IPFS as a fallback only and prevents background jobs from moving server-authoritative files.
 
 ## Documentation status
 

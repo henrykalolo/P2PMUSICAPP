@@ -4,8 +4,9 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Music, ArrowLeft, User, LogOut, Upload, Edit, Settings, Activity, Clock, Star, Pen, Sliders, ChevronDown, ChevronUp, Info } from 'lucide-react';
+import { Music, ArrowLeft, User, LogOut, Upload, Edit, Settings, Activity, Clock, Star, Pen, Sliders, ChevronDown, ChevronUp, Info, ListMusic } from 'lucide-react';
 import { useAuthStore } from '@/store/useAuthStore';
+import { EnhancedFeedItem } from '@/components/feed/EnhancedFeedItem';
 import { useTrustScore } from '@/hooks/useTrustScore';
 import { SwarmPanel } from '@/components/swarm/SwarmPanel';
 
@@ -35,14 +36,29 @@ interface UserTrack {
   genre: string;
   duration: number;
   coverArtUrl?: string;
+  streamUrl?: string | null;
+  storageType?: string;
+  serverStorageId?: string;
+  ipfsCid?: string;
   createdAt: string;
   likesCount: number;
   commentsCount: number;
+  author: { id: string; username: string; avatarUrl?: string };
+}
+
+interface UserPlaylist {
+  id: string;
+  name: string;
+  description: string | null;
+  is_public: boolean;
+  tracksCount?: number;
+  tracks?: Array<{ id: string; title: string; artist: string; coverArtUrl?: string }>;
 }
 
 export default function ProfilePage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [tracks, setTracks] = useState<UserTrack[]>([]);
+  const [playlists, setPlaylists] = useState<UserPlaylist[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('tracks');
   const [following, setFollowing] = useState<any[]>([]);
@@ -82,13 +98,28 @@ export default function ProfilePage() {
       const profileData = await profileResponse.json();
       setProfile(profileData.user);
 
-      // Fetch user's tracks
-      const tracksResponse = await fetch('/api/tracks');
-      if (tracksResponse.ok) {
-        const tracksData = await tracksResponse.json();
-        const userTracks = tracksData.tracks.filter((track: any) => track.author?.id === profileData.user.id);
-        setTracks(userTracks);
-      }
+      // Fetch user's tracks and playlists in parallel
+      await Promise.all([
+        (async () => {
+          const tracksResponse = await fetch(
+            `/api/tracks?limit=100&authorId=${encodeURIComponent(profileData.user.id)}`,
+            { headers: { Authorization: `Bearer ${token}` } }
+          );
+          if (tracksResponse.ok) {
+            const tracksData = await tracksResponse.json();
+            setTracks(tracksData.tracks || []);
+          }
+        })(),
+        (async () => {
+          const playlistsResponse = await fetch('/api/social/playlists?includeTracks=true', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (playlistsResponse.ok) {
+            const playlistsData = await playlistsResponse.json();
+            setPlaylists(playlistsData.playlists || []);
+          }
+        })(),
+      ]);
     } catch (error) {
       console.error('Failed to fetch profile:', error);
     } finally {
@@ -459,6 +490,15 @@ export default function ProfilePage() {
               My Tracks ({tracks.length})
             </Button>
             <Button
+              variant={activeTab === 'playlists' ? 'default' : 'ghost'}
+              size="sm"
+              onClick={() => setActiveTab('playlists')}
+              className="rounded-t-lg rounded-b-none"
+            >
+              <ListMusic className="h-4 w-4 mr-2" />
+              Playlists ({playlists.length})
+            </Button>
+            <Button
               variant={activeTab === 'following' ? 'default' : 'ghost'}
               size="sm"
               onClick={() => {
@@ -504,33 +544,46 @@ export default function ProfilePage() {
                 ) : (
                   <div className="space-y-4">
                     {tracks.map((track) => (
-                      <div
+                      <EnhancedFeedItem
                         key={track.id}
-                        className="flex items-center gap-4 p-4 rounded-lg hover:bg-accent/50 transition-colors"
+                        post={track}
+                        currentUserId={profile.id}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'playlists' && (
+              <div>
+                <h3 className="font-semibold mb-4">Your Playlists</h3>
+                {playlists.length === 0 ? (
+                  <div className="text-center py-12">
+                    <ListMusic className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                    <h4 className="text-lg font-semibold mb-2">No playlists yet</h4>
+                    <p className="text-muted-foreground">Playlists you create will appear here.</p>
+                  </div>
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {playlists.map((playlist) => (
+                      <div
+                        key={playlist.id}
+                        className="p-4 rounded-lg border bg-background/50"
                       >
-                        <div className="w-16 h-16 rounded bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
-                          {track.coverArtUrl ? (
-                            <img
-                              src={track.coverArtUrl}
-                              alt={track.title}
-                              className="w-full h-full rounded object-cover"
-                            />
-                          ) : (
-                            <Music className="h-8 w-8 text-primary" />
+                        <div className="flex items-center gap-2 mb-2">
+                          <ListMusic className="h-4 w-4 text-primary" />
+                          <h4 className="font-medium truncate">{playlist.name}</h4>
+                          {!playlist.is_public && (
+                            <span className="ml-auto text-xs text-muted-foreground">Private</span>
                           )}
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <h4 className="font-medium truncate">{track.title}</h4>
-                          <p className="text-sm text-muted-foreground truncate">{track.artist}</p>
-                          <p className="text-xs text-muted-foreground">{track.album} • {track.genre}</p>
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          <div className="flex items-center gap-2">
-                            <Star className="h-4 w-4" />
-                            <span>{track.likesCount}</span>
-                          </div>
-                          <div className="text-xs mt-1">{track.commentsCount} comments</div>
-                        </div>
+                        <p className="text-sm text-muted-foreground line-clamp-2 min-h-[2.5rem]">
+                          {playlist.description || 'No description'}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-3">
+                          {playlist.tracksCount ?? playlist.tracks?.length ?? 0} tracks
+                        </p>
                       </div>
                     ))}
                   </div>

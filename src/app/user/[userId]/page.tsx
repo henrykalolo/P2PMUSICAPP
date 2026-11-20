@@ -17,7 +17,8 @@ import {
   Users,
   Repeat,
   Check,
-  UserPlus
+  UserPlus,
+  ListMusic
 } from 'lucide-react';
 
 interface UserProfile {
@@ -60,6 +61,15 @@ interface UserTrack {
     username: string;
     avatarUrl?: string;
   };
+}
+
+interface UserPlaylist {
+  id: string;
+  name: string;
+  description: string | null;
+  is_public: boolean;
+  tracksCount?: number;
+  tracks?: Array<{ id: string; title: string; artist: string; coverArtUrl?: string }>;
 }
 
 interface LikedTrack {
@@ -125,12 +135,13 @@ interface Repost {
   };
 }
 
-type TabType = 'tracks' | 'likes' | 'reposts' | 'followers' | 'following';
+type TabType = 'tracks' | 'playlists' | 'likes' | 'reposts' | 'followers' | 'following';
 
 export default function UserProfilePage({ params }: { params: Promise<{ userId: string }> }) {
   const unwrappedParams = use(params);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [tracks, setTracks] = useState<UserTrack[]>([]);
+  const [playlists, setPlaylists] = useState<UserPlaylist[]>([]);
   const [likedTracks, setLikedTracks] = useState<LikedTrack[]>([]);
   const [reposts, setReposts] = useState<Repost[]>([]);
   const [followers, setFollowers] = useState<FollowUser[]>([]);
@@ -169,12 +180,19 @@ export default function UserProfilePage({ params }: { params: Promise<{ userId: 
       setIsFollowing(profileData.isFollowing);
       setIsFollowedBy(profileData.isFollowedBy || false);
 
-      // Fetch user's tracks
-      const tracksResponse = await fetch('/api/tracks');
+      // Fetch user's tracks and public playlists
+      const [tracksResponse, playlistsResponse] = await Promise.all([
+        fetch(`/api/tracks?limit=100&authorId=${encodeURIComponent(unwrappedParams.userId)}`, { headers }),
+        fetch(`/api/social/playlists?userId=${encodeURIComponent(unwrappedParams.userId)}&includeTracks=true`, { headers }),
+      ]);
+
       if (tracksResponse.ok) {
         const tracksData = await tracksResponse.json();
-        const userTracks = tracksData.tracks.filter((track: any) => track.author?.id === unwrappedParams.userId);
-        setTracks(userTracks);
+        setTracks(tracksData.tracks || []);
+      }
+      if (playlistsResponse.ok) {
+        const playlistsData = await playlistsResponse.json();
+        setPlaylists(playlistsData.playlists || []);
       }
 
       // Fetch user's liked tracks
@@ -280,6 +298,7 @@ export default function UserProfilePage({ params }: { params: Promise<{ userId: 
 
   const tabs: { id: TabType; label: string; icon: any; count: number }[] = [
     { id: 'tracks', label: 'Tracks', icon: Music, count: tracks.length },
+    { id: 'playlists', label: 'Playlists', icon: ListMusic, count: playlists.length },
     { id: 'likes', label: 'Likes', icon: Heart, count: likedTracks.length },
     { id: 'reposts', label: 'Reposts', icon: Repeat, count: reposts.length },
     { id: 'followers', label: 'Followers', icon: Users, count: profile.followersCount },
@@ -483,6 +502,32 @@ export default function UserProfilePage({ params }: { params: Promise<{ userId: 
                   <div className="space-y-4">
                     {tracks.map((track) => (
                       <EnhancedFeedItem key={track.id} post={track} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'playlists' && (
+              <div>
+                <h3 className="font-semibold mb-4">{profile.username}'s Playlists</h3>
+                {playlists.length === 0 ? (
+                  <EmptyState icon={ListMusic} title="No playlists" message="This user hasn't shared any playlists yet" />
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {playlists.map((playlist) => (
+                      <div key={playlist.id} className="p-4 rounded-lg border bg-background/50">
+                        <div className="flex items-center gap-2 mb-2">
+                          <ListMusic className="h-4 w-4 text-primary" />
+                          <h4 className="font-medium truncate">{playlist.name}</h4>
+                        </div>
+                        <p className="text-sm text-muted-foreground line-clamp-2 min-h-[2.5rem]">
+                          {playlist.description || 'No description'}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-3">
+                          {playlist.tracksCount ?? playlist.tracks?.length ?? 0} tracks
+                        </p>
+                      </div>
                     ))}
                   </div>
                 )}

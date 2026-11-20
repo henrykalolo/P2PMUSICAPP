@@ -1,28 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { retrieveFromServer } from '@/lib/storage/unifiedStorage';
+import { isUuid, PUBLIC_IMAGE_FILE_TYPES, type PublicImageFileType } from '@/lib/storage/public-url';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
 /**
- * Public avatar delivery.
+ * Public image delivery for avatars and cover art.
  *
- * Avatars are profile-visible data, so they can be rendered in <img> tags
- * without a Bearer header. Both identifiers are validated as UUIDs and the
- * file type is fixed to prevent path traversal or arbitrary file reads.
+ * These images are profile/content-visible data, so they can be rendered in
+ * <img> tags without a Bearer header. Identifiers are validated as UUIDs and
+ * the file type is fixed to an allowlist to prevent path traversal.
  */
 export async function GET(request: NextRequest) {
   const userId = request.nextUrl.searchParams.get('userId');
   const fileId = request.nextUrl.searchParams.get('id');
+  const rawFileType = request.nextUrl.searchParams.get('fileType') || 'avatar';
 
-  if (!userId || !fileId || !UUID_RE.test(userId) || !UUID_RE.test(fileId)) {
-    return NextResponse.json({ error: 'Invalid avatar reference' }, { status: 400 });
+  if (
+    !isUuid(userId) ||
+    !isUuid(fileId) ||
+    !PUBLIC_IMAGE_FILE_TYPES.includes(rawFileType as PublicImageFileType)
+  ) {
+    return NextResponse.json({ error: 'Invalid image reference' }, { status: 400 });
   }
 
   try {
-    const file = await retrieveFromServer(userId, fileId, 'avatar');
+    const file = await retrieveFromServer(userId, fileId, rawFileType);
     return new NextResponse(new Uint8Array(file.buffer), {
       status: 200,
       headers: {
@@ -33,6 +37,6 @@ export async function GET(request: NextRequest) {
       },
     });
   } catch {
-    return NextResponse.json({ error: 'Avatar not found' }, { status: 404 });
+    return NextResponse.json({ error: 'Image not found' }, { status: 404 });
   }
 }

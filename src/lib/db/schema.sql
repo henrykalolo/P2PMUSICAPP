@@ -122,9 +122,13 @@ CREATE TABLE IF NOT EXISTS posts (
   encryption_iv BYTEA,
   encryption_alg TEXT NOT NULL DEFAULT 'aes-256-gcm',
   cover_art_url TEXT,
+  description TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Existing installations predate the description column.
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS description TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_posts_author ON posts(author_id);
 CREATE INDEX IF NOT EXISTS idx_posts_created ON posts(created_at DESC);

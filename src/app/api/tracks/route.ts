@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { verifyToken } from '@/lib/auth/jwt';
 import { createTrackStreamUrl } from '@/lib/media/signed-url';
+import { isAllowedImageUrl } from '@/lib/storage/public-url';
 import {
   checkUserQuota,
   getStorageStats,
@@ -9,7 +10,7 @@ import {
   storeOnP2P,
   readEncryptionMeta,
   resolveServerFilePath,
-  checkAndBalanceStorage,
+  deleteFileUnified,
   FILE_TYPES,
   type ServerStorageResult,
   type P2PStorageResult,
@@ -29,10 +30,15 @@ export async function GET(request: NextRequest) {
     }
 
     const { searchParams } = new URL(request.url);
-    const limit = parseInt(searchParams.get('limit') || '20');
-    const offset = parseInt(searchParams.get('offset') || '0');
+    const requestedLimit = parseInt(searchParams.get('limit') || '20', 10);
+    const limit = Number.isFinite(requestedLimit)
+      ? Math.min(Math.max(requestedLimit, 1), 100)
+      : 20;
+    const requestedOffset = parseInt(searchParams.get('offset') || '0', 10);
+    const offset = Number.isFinite(requestedOffset) && requestedOffset >= 0 ? requestedOffset : 0;
     const artist = searchParams.get('artist');
     const genre = searchParams.get('genre');
+    const authorId = searchParams.get('authorId');
 
     let sql = `
       SELECT
@@ -49,6 +55,7 @@ export async function GET(request: NextRequest) {
         p.storage_type,
         p.server_storage_id,
         p.cover_art_url,
+        p.description,
         p.file_size,
         p.mime_type,
         p.is_encrypted,
@@ -68,6 +75,12 @@ export async function GET(request: NextRequest) {
     
     const params: any[] = [];
     let paramIndex = 1;
+
+    if (authorId) {
+      sql += ` AND p.author_id = $${paramIndex}`;
+      params.push(authorId);
+      paramIndex++;
+    }
 
     if (artist) {
       sql += ` AND p.artist ILIKE $${paramIndex}`;
@@ -102,6 +115,7 @@ export async function GET(request: NextRequest) {
         storageType: row.storage_type,
         serverStorageId: row.server_storage_id,
         coverArtUrl: row.cover_art_url,
+        description: row.description,
         fileSize: row.file_size,
         mimeType: row.mime_type,
         streamUrl: createTrackStreamUrl(row.id, row.storage_type, row.server_storage_id, row.ipfs_cid),
@@ -138,6 +152,10 @@ export async function GET(request: NextRequest) {
 // Uses unified storage with quota management
 // ============================================
 export async function POST(request: NextRequest) {
+  let serverStorageIdForCleanup: string | null = null;
+  let authenticatedUserId: string | null = null;
+  let trackInserted = false;
+
   try {
     // Get token from header
     const authHeader = request.headers.get('authorization');
@@ -157,6 +175,7 @@ export async function POST(request: NextRequest) {
         { status: 401 }
       );
     }
+    authenticatedUserId = payload.userId;
 
     // Check if user has completed onboarding
     if (!payload.onboardingCompleted) {
@@ -197,19 +216,31 @@ export async function POST(request: NextRequest) {
     const genre = formData.get('genre') as string;
     const year = formData.get('year') ? parseInt(formData.get('year') as string) : undefined;
     const duration = formData.get('duration') ? parseInt(formData.get('duration') as string) : undefined;
-    const coverArtUrl = formData.get('coverArtUrl') as string;
-    
+    const coverArtUrl = formData.get('coverArtUrl') as string | null;
+    const description = (formData.get('description') as string | null)?.trim() || null;
+
     // Metadata-only mode (file already uploaded via /api/storage)
     const metadataOnly = formData.get('metadataOnly') === 'true';
     const serverStorageId = formData.get('serverStorageId') as string;
     const ipfsCid = formData.get('ipfsCid') as string;
 
-    // Validate required fields
-    if (!title) {
-      return NextResponse.json(
-        { error: 'Title is required' },
-        { status: 400 }
-      );
+    if (!title || title.trim().length === 0) {
+      return NextResponse.json({ error: 'Title is required' }, { status: 400 });
+    }
+    if (title.trim().length > 200) {
+      return NextResponse.json({ error: 'Title is too long' }, { status: 400 });
+    }
+    if (description && description.length > 1000) {
+      return NextResponse.json({ error: 'Description is too long' }, { status: 400 });
+    }
+    if (coverArtUrl && !isAllowedImageUrl(coverArtUrl)) {
+      return NextResponse.json({ error: 'Invalid cover art URL' }, { status: 400 });
+    }
+    if (year !== undefined && (!Number.isFinite(year) || year < 1900 || year > new Date().getFullYear() + 1)) {
+      return NextResponse.json({ error: 'Invalid release year' }, { status: 400 });
+    }
+    if (duration !== undefined && (!Number.isFinite(duration) || duration < 0 || duration > 86400)) {
+      return NextResponse.json({ error: 'Invalid duration' }, { status: 400 });
     }
 
     if ((!file || metadataOnly) && !serverStorageId && !ipfsCid) {
@@ -217,6 +248,13 @@ export async function POST(request: NextRequest) {
         { error: 'A file, serverStorageId, or ipfsCid is required' },
         { status: 400 }
       );
+    }
+
+    if (ipfsCid) {
+      const existing = await query('SELECT id FROM posts WHERE ipfs_cid = $1', [ipfsCid]);
+      if (existing.rows.length > 0) {
+        return NextResponse.json({ error: 'Track with this CID already exists' }, { status: 409 });
+      }
     }
 
     let storageType: 'server' | 'ipfs' | 'hybrid' = 'server';
@@ -232,7 +270,13 @@ export async function POST(request: NextRequest) {
     // If file is provided directly, upload using unified storage
     if (file && !metadataOnly) {
       const audioConfig = FILE_TYPES.audio;
-      if (!audioConfig.allowedTypes.includes(file.type)) {
+      const extension = file.name.includes('.')
+        ? `.${file.name.split('.').pop()?.toLowerCase()}`
+        : '';
+      const validAudioType =
+        audioConfig.allowedTypes.includes(file.type) ||
+        (file.type.startsWith('audio/') && audioConfig.extensions.includes(extension));
+      if (!validAudioType) {
         return NextResponse.json(
           { error: 'Invalid audio file type' },
           { status: 400 }
@@ -245,11 +289,6 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Check server storage and balance if needed before upload
-      if (file.size > 10 * 1024 * 1024) { // Only balance for files > 10MB
-        await checkAndBalanceStorage();
-      }
-      
       mimeType = file.type;
       fileSize = file.size;
 
@@ -306,20 +345,7 @@ export async function POST(request: NextRequest) {
       instantReady = false;
     }
 
-    // Check for duplicate CID if provided
-    if (ipfsCidResult) {
-      const existingResult = await query(
-        'SELECT id FROM posts WHERE ipfs_cid = $1',
-        [ipfsCidResult]
-      );
-
-      if (existingResult.rows.length > 0) {
-        return NextResponse.json(
-          { error: 'Track with this CID already exists' },
-          { status: 409 }
-        );
-      }
-    }
+    serverStorageIdForCleanup = serverStorageIdResult;
 
     // Insert track into database
     const result = await query(
@@ -339,16 +365,17 @@ export async function POST(request: NextRequest) {
         file_size,
         mime_type,
         cover_art_url,
+        description,
         is_encrypted,
         encryption_iv
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
       RETURNING *`,
       [
         payload.userId,
-        title,
-        artist || 'Unknown Artist',
-        album || 'Unknown Album',
-        genre || '',
+        title.trim(),
+        artist?.trim() || 'Unknown Artist',
+        album?.trim() || 'Unknown Album',
+        genre?.trim() || '',
         year || new Date().getFullYear(),
         duration || 0,
         ipfsCidResult,
@@ -359,6 +386,7 @@ export async function POST(request: NextRequest) {
         fileSize,
         mimeType,
         coverArtUrl || null,
+        description,
         isEncrypted,
         encryptionIv ? Buffer.from(encryptionIv, 'hex') : null,
       ]
@@ -370,6 +398,7 @@ export async function POST(request: NextRequest) {
       [payload.userId]
     );
 
+    trackInserted = true;
     const track = result.rows[0];
 
     return NextResponse.json({
@@ -391,6 +420,7 @@ export async function POST(request: NextRequest) {
         streamUrl: createTrackStreamUrl(track.id, track.storage_type, track.server_storage_id, track.ipfs_cid),
         isEncrypted: track.is_encrypted,
         coverArtUrl: track.cover_art_url,
+        description: track.description,
         instantReady, // Track is instantly ready for server storage
         createdAt: track.created_at,
       },
@@ -403,6 +433,18 @@ export async function POST(request: NextRequest) {
     }, { status: 201 });
   } catch (error) {
     console.error('Create track error:', error);
+    if (!trackInserted && serverStorageIdForCleanup && authenticatedUserId) {
+      try {
+        await deleteFileUnified(
+          authenticatedUserId,
+          'server',
+          serverStorageIdForCleanup,
+          'audio'
+        );
+      } catch (cleanupError) {
+        console.warn('Could not remove orphaned upload', cleanupError);
+      }
+    }
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

@@ -49,19 +49,8 @@ export default function UploadPage() {
     }
   }, [setUser, setAuthenticated, setLoading]);
 
-  const handleUploadComplete = (metadata: {
-    title: string;
-    artist: string;
-    album: string;
-    genre: string;
-    year: number;
-    duration: number;
-    storageResult: any;
-  }) => {
-    console.log('Upload complete:', metadata);
-    // Redirect to user posts feed
-    window.location.href = '/feed';
-  };
+  // The upload component owns the success state and links to the new track.
+  const handleUploadComplete = () => {};
 
   // Show loading state
   if (isLoading || !authChecked) {

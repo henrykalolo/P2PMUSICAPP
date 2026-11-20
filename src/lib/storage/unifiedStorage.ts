@@ -8,7 +8,7 @@
  * 4. Distributes excess data to P2P storage when quota exceeded
  */
 
-import { writeFile, mkdir, stat, readFile, unlink } from 'fs/promises';
+import { writeFile, mkdir, stat, readFile, unlink, statfs } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
@@ -24,6 +24,9 @@ export const STORAGE_DIR = process.env.STORAGE_DIR || './uploads';
 export const DEFAULT_DAILY_QUOTA = 100 * 1024 * 1024; // 100MB per day
 export const DEFAULT_TOTAL_QUOTA = 10 * 1024 * 1024 * 1024; // 10GB total
 export const SERVER_STORAGE_PRIORITY = true; // Always prefer server storage
+// Automatic migration to IPFS/P2P is disabled by default. IPFS is an optional
+// fallback, not a background job that can evict server-authoritative files.
+export const ENABLE_P2P_MIGRATION = process.env.ENABLE_P2P_MIGRATION === 'true';
 
 // ============================================
 // Storage System Enum
@@ -217,8 +220,22 @@ function formatBytes(bytes: number): string {
 export const FILE_TYPES = {
   audio: {
     maxSize: 100 * 1024 * 1024, // 100MB
-    allowedTypes: ['audio/mpeg', 'audio/mp3', 'audio/ogg', 'audio/wav', 'audio/flac', 'audio/m4a'],
-    extensions: ['.mp3', '.ogg', '.wav', '.flac', '.m4a'],
+    allowedTypes: [
+      'audio/mpeg',
+      'audio/mp3',
+      'audio/mp4',
+      'audio/ogg',
+      'audio/wav',
+      'audio/x-wav',
+      'audio/wave',
+      'audio/vnd.wave',
+      'audio/flac',
+      'audio/x-flac',
+      'audio/m4a',
+      'audio/x-m4a',
+      'audio/aac',
+    ],
+    extensions: ['.mp3', '.ogg', '.oga', '.wav', '.flac', '.m4a', '.mp4', '.aac'],
   },
   image: {
     maxSize: 5 * 1024 * 1024, // 5MB
@@ -858,42 +875,38 @@ export async function getServerStorageStats(): Promise<{
   belowThreshold: boolean;
 }> {
   try {
-    // Use df command to get disk usage
-    const { execSync } = await import('child_process');
-    
-    // Get disk usage for the storage directory
-    const dfOutput = execSync(`df -B 1 "${STORAGE_DIR}" 2>/dev/null || df -B 1 / 2>/dev/null`)
-      .toString()
-      .trim()
-      .split('\n')[1]
-      .split(/\s+/);
-    
-    // df output: Filesystem, 1K-blocks, Used, Available, Use%, Mounted on
-    // Or with -B 1: Filesystem, 1-blocks, Used, Available, Use%, Mounted on
-    const totalSpace = parseInt(dfOutput[1]);
-    const usedSpace = parseInt(dfOutput[2]);
-    const freeSpace = parseInt(dfOutput[3]);
-    const usagePercentage = parseFloat(dfOutput[4].replace('%', ''));
-    
+    await mkdir(STORAGE_DIR, { recursive: true });
+
+    // Portable filesystem stats. The old `df` shell command failed on Windows
+    // and produced noisy errors on every storage request.
+    const stats = await statfs(STORAGE_DIR);
+    const blockSize = stats.bsize || 4096;
+    const totalSpace = stats.blocks * blockSize;
+    const freeSpace = stats.bavail * blockSize;
+    const usedSpace = (stats.blocks - stats.bfree) * blockSize;
+    const usagePercentage = totalSpace > 0 ? (usedSpace / totalSpace) * 100 : 0;
+
     return {
       totalSpace,
       usedSpace,
       freeSpace,
       usagePercentage,
-      belowThreshold: usagePercentage >= 50,
+      belowThreshold: usagePercentage >= STORAGE_THRESHOLDS.WARNING,
     };
   } catch (error) {
-    console.error('Failed to get server storage stats:', error);
-    
+    console.warn('Filesystem stats unavailable; estimating from upload directory', error);
+
     // Fallback: estimate based on storage directory size
     try {
       const dirSize = await getDirectorySize(STORAGE_DIR);
+      const assumedTotal = 100 * 1024 * 1024 * 1024;
+      const usagePercentage = (dirSize / assumedTotal) * 100;
       return {
-        totalSpace: 100 * 1024 * 1024 * 1024, // Assume 100GB total
+        totalSpace: assumedTotal,
         usedSpace: dirSize,
-        freeSpace: 100 * 1024 * 1024 * 1024 - dirSize,
-        usagePercentage: (dirSize / (100 * 1024 * 1024 * 1024)) * 100,
-        belowThreshold: (dirSize / (100 * 1024 * 1024 * 1024)) * 100 >= 50,
+        freeSpace: assumedTotal - dirSize,
+        usagePercentage,
+        belowThreshold: usagePercentage >= STORAGE_THRESHOLDS.WARNING,
       };
     } catch {
       // Return safe defaults
@@ -915,6 +928,7 @@ async function getDirectorySize(dirPath: string): Promise<number> {
   let totalSize = 0;
   
   try {
+    await mkdir(dirPath, { recursive: true });
     const entries = await list_files(dirPath, true);
     
     for (const entry of entries) {
@@ -957,7 +971,9 @@ async function list_files(
       }
     }
   } catch (error) {
-    console.error('Failed to list directory:', error);
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.error('Failed to list directory:', error);
+    }
   }
   
   return entries;
@@ -1105,6 +1121,16 @@ export async function balanceServerStorage(
   errors: string[];
   finalUsage: number;
 }> {
+  if (!ENABLE_P2P_MIGRATION) {
+    const stats = await getServerStorageStats();
+    return {
+      migratedCount: 0,
+      freedSpace: 0,
+      errors: [],
+      finalUsage: stats.usagePercentage,
+    };
+  }
+
   const results = {
     migratedCount: 0,
     freedSpace: 0,
@@ -1227,6 +1253,10 @@ export async function emergencyStorageRecovery(): Promise<{
   freedSpace: number;
   errors: string[];
 }> {
+  if (!ENABLE_P2P_MIGRATION) {
+    return { migratedCount: 0, freedSpace: 0, errors: [] };
+  }
+
   console.log('EMERGENCY: Storage critical, starting emergency recovery...');
   
   const stats = await getServerStorageStats();
@@ -1289,6 +1319,15 @@ export async function checkAndBalanceStorage(): Promise<{
   migratedCount: number;
   finalUsage: number;
 }> {
+  if (!ENABLE_P2P_MIGRATION) {
+    return {
+      balanced: false,
+      freedSpace: 0,
+      migratedCount: 0,
+      finalUsage: 0,
+    };
+  }
+
   const stats = await getServerStorageStats();
   
   // Emergency recovery if critical
@@ -1332,6 +1371,10 @@ export async function uploadFileWithBalancing(
   options: UnifiedUploadOptions
 ): Promise<StorageResult> {
   const fileSize = options.file.size;
+
+  if (!ENABLE_P2P_MIGRATION) {
+    return uploadFileUnified(userId, options);
+  }
   
   // Check server storage before upload
   const storageStats = await getServerStorageStats();

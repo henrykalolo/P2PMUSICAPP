@@ -14,7 +14,7 @@ function getUserSubdirPath(userId: string, subdir: string): string {
 
 // Allowed extensions for different file types
 const FILE_EXTENSIONS = {
-  audio: ['.mp3', '.ogg', '.wav', '.flac', '.m4a'],
+  audio: ['.mp3', '.ogg', '.oga', '.wav', '.flac', '.m4a', '.mp4', '.aac'],
   image: ['.jpg', '.jpeg', '.png', '.gif', '.webp'],
   avatar: ['.jpg', '.jpeg', '.png', '.gif', '.webp'],
   coverArt: ['.jpg', '.jpeg', '.png', '.gif', '.webp'],
