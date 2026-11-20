@@ -36,8 +36,8 @@ interface Track {
   album: string;
   genre: string;
   duration: number;
-  magnetUri?: string;
   ipfsCid?: string;
+  streamUrl?: string | null;
   coverArtUrl?: string;
   createdAt: string;
   author: {

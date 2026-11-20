@@ -176,7 +176,7 @@ export function TrendsSidebar({ userId }: TrendsSidebarProps) {
           {trends.popularTracks.map((track) => (
             <Link
               key={track.id}
-              href={`/track/${track.id}`}
+              href={`/post/${track.id}`}
               className="flex items-center gap-3 p-2 rounded-lg hover:bg-accent/50 transition-colors"
             >
               <div className="w-10 h-10 rounded bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
@@ -212,7 +212,7 @@ export function TrendsSidebar({ userId }: TrendsSidebarProps) {
             {trends.recentComments.map((comment) => (
               <Link
                 key={comment.id}
-                href={`/track/${comment.post.id}`}
+                href={`/post/${comment.post.id}`}
                 className="p-2 rounded-lg hover:bg-accent/50 transition-colors"
               >
                 <div className="flex items-center gap-2 mb-1">

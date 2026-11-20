@@ -6,13 +6,10 @@ import { verifyToken } from '@/lib/auth/jwt';
 const protectedRoutes = [
   '/api/onboarding',
   '/api/social',
-  '/api/upload',
 ];
 
-// Routes that require onboarding completion
-const onboardingRequiredRoutes = [
-  '/api/upload',
-];
+// Onboarding is validated inside each write route that needs it.
+const onboardingRequiredRoutes: string[] = [];
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;

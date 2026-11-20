@@ -1,313 +1,293 @@
 'use client';
 
+/**
+ * Server-authoritative audio player.
+ *
+ * Playback always uses an authorized, range-capable /api/media URL so seeking
+ * and instant readiness work for every uploaded track. P2P/IPFS remains an
+ * optional redirect handled by the API, never a client-side dependency.
+ */
+
 import React, { useEffect, useRef, useState } from 'react';
-import { usePlayerStore } from '@/store/usePlayerStore';
 import { Button } from '@/components/ui/button';
-import { Play, Pause, SkipBack, SkipForward, Volume2, Loader2, Wifi } from 'lucide-react';
-import { UnifiedStorage, StorageSystem, StorageResult } from '@/lib/storage/unifiedStorage';
+import { AlertTriangle, Loader2, Pause, Play, SkipBack, SkipForward, Volume2 } from 'lucide-react';
+import { usePlayerStore } from '@/store/usePlayerStore';
 
 interface UnifiedMusicPlayerProps {
-  /** Track identifier - can be IPFS CID, torrent infoHash, or local storage key */
+  /** Track UUID from the posts table. */
   trackId: string;
-  /** MIME type of the audio file */
+  /** Signed playback URL returned by /api/tracks. Optional. */
+  src?: string | null;
   mimeType?: string;
-  /** Track title */
   title?: string;
-  /** Track artist */
   artist?: string;
-  /** Preferred storage system (optional) */
-  preferredStorage?: StorageSystem;
-  /** Server storage ID for fallback (used when IPFS isn't propagated yet) */
+  poster?: string;
+  /** Kept for backwards compatibility with older feed props; unused. */
+  preferredStorage?: unknown;
+  /** Kept for backwards compatibility; use trackId instead. */
   serverStorageId?: string;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function formatTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0:00';
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
 export const UnifiedMusicPlayer: React.FC<UnifiedMusicPlayerProps> = ({
   trackId,
-  mimeType = 'audio/mpeg',
+  src,
   title = 'Unknown Track',
   artist = 'Unknown Artist',
-  preferredStorage,
-  serverStorageId,
+  poster,
 }) => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const objectUrlRef = useRef<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [mediaUrl, setMediaUrl] = useState<string | null>(src || null);
+  const [status, setStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>(
+    src ? 'loading' : 'idle'
+  );
   const [error, setError] = useState<string | null>(null);
-  const [loadProgress, setLoadProgress] = useState(0);
-  const [usedStorage, setUsedStorage] = useState<StorageSystem | null>(null);
-  
-  const {
-    isPlaying,
-    progress,
-    volume,
-    setIsPlaying,
-    setProgress,
-    setVolume,
-  } = usePlayerStore();
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [buffered, setBuffered] = useState(0);
+  const retriedRef = useRef(false);
 
-  // Load audio from unified storage
+  const { isPlaying, volume, setIsPlaying, setVolume } = usePlayerStore();
+
+  // Resolve a short-lived playback URL when one was not supplied by the API.
   useEffect(() => {
-    const loadAudio = async () => {
-      setIsLoading(true);
+    retriedRef.current = false;
+    if (src) {
+      setMediaUrl(src);
+      setStatus('loading');
       setError(null);
-      setLoadProgress(0);
+      return;
+    }
+    if (!UUID_RE.test(trackId)) {
+      setError('This track has no playable media source.');
+      setStatus('error');
+      return;
+    }
 
+    const controller = new AbortController();
+    setStatus('loading');
+    setError(null);
+
+    fetch(`/api/media/token?trackId=${encodeURIComponent(trackId)}`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Playback authorization failed');
+        return response.json() as Promise<{ url: string }>;
+      })
+      .then((data) => {
+        if (typeof data.url !== 'string' || !data.url.startsWith('/api/media/')) {
+          throw new Error('Invalid playback URL');
+        }
+        setMediaUrl(data.url);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        setError(err instanceof Error ? err.message : 'Unable to load track');
+        setStatus('error');
+      });
+
+    return () => controller.abort();
+  }, [src, trackId]);
+
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.volume = volume;
+  }, [volume, mediaUrl]);
+
+  const handlePlayPause = async () => {
+    const audio = audioRef.current;
+    if (!audio || status === 'error') return;
+    if (audio.paused) {
       try {
-        // Perform health check on storage systems
-        const healthCheck = await UnifiedStorage.healthCheck();
-        console.log('Storage system health:', healthCheck);
-        
-        // Try to load from storage with fallback
-        const storageOptions = {
-          preferredSystem: preferredStorage,
-          timeout: 30000, // 30 seconds
-          cache: true,
-          onProgress: (progress: number) => setLoadProgress(progress),
-        };
-
-        console.log(`Attempting to load track ${trackId} with options:`, storageOptions);
-        
-        // Determine the effective track ID to use (fallback to server storage if IPFS not available)
-        let effectiveTrackId = trackId;
-        let useServerFallback = false;
-        
-        // Check if content is available in IPFS/network storage
-        const availability = await UnifiedStorage.isContentAvailable(trackId);
-        
-        // If not available and we have a server storage ID, use that instead
-        if (!availability.available && serverStorageId) {
-          console.log(`Track ${trackId} not available in P2P network, using server fallback: ${serverStorageId}`);
-          effectiveTrackId = serverStorageId;
-          useServerFallback = true;
-        } else if (!availability.available) {
-          throw new Error('Track not available in any storage system');
-        }
-
-        console.log('Track available in systems:', availability.systems);
-
-        // Load the audio element with fallback mechanism
-        const audio = await UnifiedStorage.streamAudio(
-          effectiveTrackId,
-          mimeType,
-          storageOptions
-        );
-        
-        // Set the storage system that was used
-        setUsedStorage(useServerFallback ? StorageSystem.SERVER_FILE_SYSTEM : (preferredStorage || StorageSystem.IPFS));
-        
-        // Determine which system was used
-        // Check for various CID formats (v0:Qm..., v1:bafybe...) and other identifiers
-        if (trackId.startsWith('Qm') || trackId.startsWith('bafybe') || trackId.startsWith('bafkri') || trackId.startsWith('bafkr')) {
-          setUsedStorage(StorageSystem.IPFS);
-        } else if (trackId.startsWith('magnet:')) {
-          setUsedStorage(StorageSystem.WEB_TORRENT);
-        } else if (trackId.startsWith('file-')) {
-          setUsedStorage(StorageSystem.INDEXED_DB);
-        } else if (useServerFallback) {
-          setUsedStorage(StorageSystem.SERVER_FILE_SYSTEM);
-        }
-
-        audio.preload = 'metadata';
-        audio.volume = volume;
-
-        // Set up event listeners
-        audio.addEventListener('loadedmetadata', () => {
-          setIsLoading(false);
-          setLoadProgress(100);
-        });
-
-        audio.addEventListener('timeupdate', () => {
-          if (audio.duration) {
-            setProgress((audio.currentTime / audio.duration) * 100);
-          }
-        });
-
-        audio.addEventListener('play', () => setIsPlaying(true));
-        audio.addEventListener('pause', () => setIsPlaying(false));
-        audio.addEventListener('ended', () => setIsPlaying(false));
-
-        audio.addEventListener('error', (e) => {
-          console.error('Audio error:', e);
-          setError('Failed to load audio');
-          setIsLoading(false);
-        });
-
-        audioRef.current = audio;
-        setIsLoading(false);
-
-      } catch (err) {
-        console.error('Player initialization error:', err);
-        const errorMessage = err instanceof Error ? err.message : 'Failed to initialize player';
-        setError(errorMessage);
-        setIsLoading(false);
+        await audio.play();
+      } catch {
+        setError('Playback was blocked. Try again after interacting with the page.');
       }
-    };
-
-    loadAudio();
-
-    // Cleanup
-    return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current.src = '';
-        audioRef.current = null;
-      }
-      if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current);
-        objectUrlRef.current = null;
-      }
-    };
-  }, [trackId, mimeType, volume, setIsPlaying, setProgress, preferredStorage]);
-
-  const handlePlayPause = () => {
-    if (audioRef.current && !isLoading) {
-      if (isPlaying) {
-        audioRef.current.pause();
-      } else {
-        audioRef.current.play().catch((err) => {
-          console.error('Play error:', err);
-          setError('Failed to play audio');
-        });
-      }
+    } else {
+      audio.pause();
     }
   };
 
-  const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newVolume = parseFloat(e.target.value);
-    setVolume(newVolume);
-    if (audioRef.current) {
-      audioRef.current.volume = newVolume;
+  const handleSkip = (delta: number) => {
+    const audio = audioRef.current;
+    if (!audio || !Number.isFinite(audio.duration)) return;
+    audio.currentTime = Math.min(Math.max(0, audio.currentTime + delta), audio.duration);
+  };
+
+  const handleSeek = (value: number) => {
+    const audio = audioRef.current;
+    if (!audio || !Number.isFinite(audio.duration)) return;
+    audio.currentTime = (value / 100) * audio.duration;
+    setCurrentTime(audio.currentTime);
+  };
+
+  const handleVolume = (value: number) => {
+    setVolume(value);
+    if (audioRef.current) audioRef.current.volume = value;
+  };
+
+  const handleProgress = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (!Number.isFinite(audio.duration) || audio.duration <= 0) return;
+    setCurrentTime(audio.currentTime);
+    if (audio.buffered.length > 0) {
+      setBuffered((audio.buffered.end(audio.buffered.length - 1) / audio.duration) * 100);
     }
   };
 
-  const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const seekPercent = parseFloat(e.target.value);
-    if (audioRef.current && audioRef.current.duration) {
-      const seekTime = (seekPercent / 100) * audioRef.current.duration;
-      audioRef.current.currentTime = seekTime;
-      setProgress(seekPercent);
+  // A feed URL can outlive its one-hour token. Refresh once on playback failure.
+  const refreshPlaybackUrl = async () => {
+    if (retriedRef.current || !UUID_RE.test(trackId)) {
+      setError('This track could not be played. It may have been removed.');
+      setStatus('error');
+      setIsPlaying(false);
+      return;
+    }
+    retriedRef.current = true;
+    setStatus('loading');
+    setError(null);
+    try {
+      const response = await fetch(`/api/media/token?trackId=${encodeURIComponent(trackId)}`);
+      if (!response.ok) throw new Error('Playback authorization failed');
+      const data = (await response.json()) as { url?: unknown };
+      if (typeof data.url !== 'string' || !data.url.startsWith('/api/media/')) {
+        throw new Error('Invalid playback URL');
+      }
+      setMediaUrl(data.url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to load track');
+      setStatus('error');
+      setIsPlaying(false);
     }
   };
 
-  if (error) {
-    return (
-      <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
-        <p className="text-amber-600 font-medium">{error}</p>
-        {error.includes('not available') && (
-          <p className="text-sm text-amber-500 mt-2">
-            This track may still be propagating on the P2P network. A server fallback is being used if available.
-          </p>
-        )}
-        <p className="text-xs text-muted-foreground mt-2 font-mono">
-          Track ID: {trackId.slice(0, 20)}...
-        </p>
-        {serverStorageId && (
-          <p className="text-xs text-muted-foreground mt-1 font-mono">
-            Server fallback: {serverStorageId.slice(0, 20)}...
-          </p>
-        )}
-      </div>
-    );
-  }
+  const ready = status === 'ready';
 
   return (
-    <div className="p-4 bg-card border rounded-lg shadow-sm">
-      {/* Track Info */}
-      <div className="mb-4">
-        <h3 className="font-semibold text-lg truncate">{title}</h3>
-        <p className="text-sm text-muted-foreground">{artist}</p>
-        <p className="text-xs text-muted-foreground mt-1 font-mono">
-          {usedStorage ? `${usedStorage.toUpperCase()}:` : ''} {trackId.slice(0, 16)}...{trackId.slice(-8)}
-        </p>
+    <div className="rounded-lg border bg-card p-3" aria-label={`Player for ${title}`}>
+      {poster && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={poster} alt={`${title} cover`} className="mb-3 h-32 w-32 rounded object-cover" />
+      )}
+
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold">{title}</p>
+          <p className="truncate text-xs text-muted-foreground">{artist}</p>
+        </div>
+        {status === 'loading' && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
       </div>
 
-      {/* Controls */}
-      <div className="flex items-center gap-4 mb-4">
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => {}}
-            disabled={isLoading}
-          >
-            <SkipBack className="h-4 w-4" />
-          </Button>
-          
-          <Button
-            size="icon"
-            onClick={handlePlayPause}
-            disabled={isLoading}
-          >
-            {isLoading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : isPlaying ? (
-              <Pause className="h-4 w-4" />
-            ) : (
-              <Play className="h-4 w-4" />
-            )}
-          </Button>
-          
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => {}}
-            disabled={isLoading}
-          >
-            <SkipForward className="h-4 w-4" />
-          </Button>
+      {error ? (
+        <div className="flex items-start gap-2 rounded bg-destructive/10 p-2 text-sm text-destructive">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{error}</span>
         </div>
-
-        {/* Progress Bar */}
-        <div className="flex-1">
+      ) : (
+        <>
+          <div className="relative h-1.5 w-full overflow-hidden rounded bg-secondary">
+            <div
+              className="absolute inset-y-0 left-0 bg-muted-foreground/40"
+              style={{ width: `${Math.min(100, buffered)}%` }}
+            />
+            <div
+              className="absolute inset-y-0 left-0 bg-primary"
+              style={{
+                width: `${duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0}%`,
+              }}
+            />
+          </div>
           <input
             type="range"
-            min="0"
-            max="100"
-            step="0.1"
-            value={progress}
-            onChange={handleSeek}
-            disabled={isLoading}
-            className="w-full h-2 bg-secondary rounded-full appearance-none cursor-pointer accent-primary"
-            style={{
-              background: `linear-gradient(to right, hsl(var(--primary)) ${progress}%, hsl(var(--secondary)) ${progress}%)`,
-            }}
+            min={0}
+            max={100}
+            step={0.1}
+            value={duration > 0 ? (currentTime / duration) * 100 : 0}
+            onChange={(event) => handleSeek(Number(event.target.value))}
+            disabled={!ready}
+            aria-label="Seek"
+            className="mt-1 h-4 w-full cursor-pointer disabled:cursor-not-allowed"
           />
-        </div>
+          <div className="flex justify-between text-[10px] text-muted-foreground">
+            <span>{formatTime(currentTime)}</span>
+            <span>{formatTime(duration)}</span>
+          </div>
+        </>
+      )}
 
-        {/* Volume Control */}
-        <div className="flex items-center gap-2">
-          <Volume2 className="h-4 w-4" />
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.1"
-            value={volume}
-            onChange={handleVolumeChange}
-            className="w-20 h-2 bg-secondary rounded-full appearance-none cursor-pointer accent-primary"
-            style={{
-              background: `linear-gradient(to right, hsl(var(--primary)) ${volume * 100}%, hsl(var(--secondary)) ${volume * 100}%)`,
-            }}
-          />
-        </div>
+      <div className="mt-2 flex items-center gap-2">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={() => handleSkip(-10)}
+          disabled={!ready}
+          aria-label="Back 10 seconds"
+        >
+          <SkipBack className="h-4 w-4" />
+        </Button>
+        <Button
+          type="button"
+          size="icon"
+          onClick={handlePlayPause}
+          disabled={!ready || !mediaUrl}
+          aria-label={isPlaying ? 'Pause' : 'Play'}
+        >
+          {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={() => handleSkip(10)}
+          disabled={!ready}
+          aria-label="Forward 10 seconds"
+        >
+          <SkipForward className="h-4 w-4" />
+        </Button>
+        <Volume2 className="ml-2 h-4 w-4 text-muted-foreground" />
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.01}
+          value={volume}
+          onChange={(event) => handleVolume(Number(event.target.value))}
+          aria-label="Volume"
+          className="h-4 w-20 cursor-pointer"
+        />
       </div>
 
-      {/* Status */}
-      <div className="flex items-center justify-between text-sm text-muted-foreground">
-        <div className="flex items-center gap-4">
-          <span className="flex items-center gap-1">
-            <Wifi className="h-4 w-4" />
-            {usedStorage || 'Loading...'}
-          </span>
-          {isLoading && (
-            <span className="flex items-center gap-1">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              {`Loading... ${Math.round(loadProgress)}%`}
-            </span>
-          )}
-        </div>
-        {isPlaying && <span className="text-green-500">● Playing</span>}
-      </div>
+      {mediaUrl && (
+        <audio
+          ref={audioRef}
+          src={mediaUrl}
+          preload="metadata"
+          onLoadedMetadata={(event) => {
+            setDuration(event.currentTarget.duration || 0);
+            setStatus('ready');
+          }}
+          onCanPlay={() => setStatus('ready')}
+          onTimeUpdate={handleProgress}
+          onProgress={handleProgress}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+          onEnded={() => setIsPlaying(false)}
+          onError={() => {
+            void refreshPlaybackUrl();
+          }}
+          className="hidden"
+        />
+      )}
     </div>
   );
 };

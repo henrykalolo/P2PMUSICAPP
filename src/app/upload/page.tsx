@@ -111,7 +111,7 @@ export default function UploadPage() {
               </div>
               <h1 className="text-2xl font-bold mb-2">Authentication Required</h1>
               <p className="text-muted-foreground mb-6">
-                You need to create an account or sign in to upload music to the P2P network.
+                You need to create an account or sign in to upload music.
               </p>
             </div>
 
@@ -168,7 +168,7 @@ export default function UploadPage() {
         <div className="max-w-md mx-auto">
           <h1 className="text-2xl font-bold mb-2">Upload Music</h1>
           <p className="text-muted-foreground mb-6">
-            Share your music with the P2P network. Files are encrypted and distributed across peers.
+            Share your music. Files are encrypted at rest on the server and ready to play immediately.
           </p>
 
           <UploadComponent onUploadComplete={handleUploadComplete} />

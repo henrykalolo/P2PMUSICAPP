@@ -1,3 +1,5 @@
+> **Historical planning document.** The mock monetization/scaling modules referenced here were removed from the codebase. See [ARCHITECTURE.md](./ARCHITECTURE.md).
+
 # Phase 4: Scale & Monetization - Implementation Plan
 
 ## Overview

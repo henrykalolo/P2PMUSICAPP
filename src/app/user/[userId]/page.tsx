@@ -50,6 +50,7 @@ interface UserTrack {
   genre: string;
   duration: number;
   coverArtUrl?: string;
+  streamUrl?: string | null;
   createdAt: string;
   likesCount: number;
   commentsCount: number;
@@ -69,6 +70,7 @@ interface LikedTrack {
   genre: string;
   duration: number;
   coverArtUrl?: string;
+  streamUrl?: string | null;
   createdAt: string;
   likesCount: number;
   commentsCount: number;
@@ -107,8 +109,8 @@ interface Repost {
     album: string;
     genre: string;
     duration: number;
-    magnetUri?: string;
     ipfsCid?: string;
+    streamUrl?: string | null;
     coverArtUrl?: string;
     createdAt: string;
     likesCount: number;

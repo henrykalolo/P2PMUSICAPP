@@ -105,11 +105,12 @@ export default function GettingStartedPage() {
                 <li>MP3, OGG, WAV, FLAC, M4A formats</li>
                 <li>Maximum file size: 100MB</li>
                 <li>Automatic metadata extraction</li>
-                <li>End-to-end encryption before upload</li>
+                <li>AES-256-GCM encryption at rest</li>
               </ul>
               
               <p className="text-muted-foreground mb-4">
-                Your music is encrypted with AES-256-GCM and distributed across the peer-to-peer network using IPFS and WebTorrent.
+                Your music is encrypted with AES-256-GCM in server storage and is ready to
+                play immediately. IPFS can be used as optional secondary storage.
               </p>
               
               <Link href="/upload">

@@ -319,10 +319,12 @@ export default function PostPage({ params }: { params: Promise<{ postId: string 
 
             {/* Music Player */}
             <div className="mb-6">
-              <UnifiedMusicPlayer 
-                trackId={post.ipfsCid || post.magnetUri || post.id}
+              <UnifiedMusicPlayer
+                trackId={post.id}
+                src={post.streamUrl}
                 title={post.title}
                 artist={post.artist}
+                poster={post.coverArtUrl}
               />
             </div>
 

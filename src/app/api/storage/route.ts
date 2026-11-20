@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyToken } from '@/lib/auth/jwt';
+import { parseRangeHeader, readMediaRange } from '@/lib/media/storage-reader';
 import {
   uploadFileWithBalancing,
   retrieveFileUnified,
@@ -198,13 +199,34 @@ export async function GET(request: NextRequest) {
     const result = await retrieveFileUnified(userId, storageType, fileId, fileType);
 
     if (result.buffer) {
-      // Server storage - return file directly
-      return new NextResponse(result.buffer as unknown as BodyInit, {
-        headers: {
-          'Content-Type': result.mimeType,
-          'Content-Length': result.size.toString(),
-          'Cache-Control': 'public, max-age=31536000',
-        },
+      // Server storage: honor byte ranges and never cache private files publicly.
+      const rangeHeader = request.headers.get('range');
+      const range = parseRangeHeader(rangeHeader, result.size);
+      if (rangeHeader && !range) {
+        return new NextResponse(null, {
+          status: 416,
+          headers: {
+            'Accept-Ranges': 'bytes',
+            'Content-Range': `bytes */${result.size}`,
+          },
+        });
+      }
+      const start = range?.start ?? 0;
+      const end = range?.end ?? Math.max(0, result.size - 1);
+      const slice = await readMediaRange(userId, fileId, fileType, start, end);
+      const headers = new Headers({
+        'Content-Type': result.mimeType,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': String(slice.data.length),
+        'Cache-Control': 'private, no-store',
+        'X-Content-Type-Options': 'nosniff',
+      });
+      if (range) {
+        headers.set('Content-Range', `bytes ${start}-${Math.min(end, slice.total - 1)}/${result.size}`);
+      }
+      return new NextResponse(new Uint8Array(slice.data), {
+        status: range ? 206 : 200,
+        headers,
       });
     }
 

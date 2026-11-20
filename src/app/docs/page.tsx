@@ -87,8 +87,8 @@ export default function DocsPage() {
 
             <h3 className="text-xl font-semibold mt-6 mb-3">2. Upload Music</h3>
             <p className="text-muted-foreground mb-4">
-              Upload your audio files (MP3, OGG, WAV, FLAC, M4A). Files are automatically 
-              encrypted and distributed across the P2P network using IPFS and WebTorrent.
+              Upload your audio files (MP3, OGG, WAV, FLAC, M4A). Files are encrypted at
+              rest on the server and playable immediately; IPFS is optional.
             </p>
 
             <h3 className="text-xl font-semibold mt-6 mb-3">3. Build Your Network</h3>

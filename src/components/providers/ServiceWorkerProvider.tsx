@@ -1,16 +1,13 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { NotificationProvider } from '@/context/NotificationContext';
 
 interface ServiceWorkerContextType {
   isSupported: boolean;
   isRegistered: boolean;
   registration: ServiceWorkerRegistration | null;
-  startSeeding: (infoHash: string) => Promise<void>;
-  stopSeeding: (infoHash: string) => Promise<void>;
   cacheTrack: (trackId: string, url: string) => Promise<void>;
-  getSeedingStatus: () => Promise<{ infoHash: string; active: boolean }[]>;
   clearCache: () => Promise<void>;
 }
 
@@ -34,139 +31,70 @@ export const ServiceWorkerProvider: React.FC<ServiceWorkerProviderProps> = ({ ch
   const [registration, setRegistration] = useState<ServiceWorkerRegistration | null>(null);
 
   useEffect(() => {
-    // Check if service workers are supported
-    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
-      console.log('[SW] Service workers not supported');
-      return;
-    }
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
 
     setIsSupported(true);
 
-    // Register service worker
-    const registerSW = async () => {
-      try {
-        const reg = await navigator.serviceWorker.register('/sw.js');
-        console.log('[SW] Service Worker registered:', reg);
+    let cancelled = false;
+    navigator.serviceWorker
+      .register('/sw.js')
+      .then((reg) => {
+        if (cancelled) return;
         setRegistration(reg);
         setIsRegistered(true);
-
-        // Handle updates
-        reg.addEventListener('updatefound', () => {
-          const newWorker = reg.installing;
-          if (newWorker) {
-            newWorker.addEventListener('statechange', () => {
-              if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                console.log('[SW] New version available');
-                // Could show update notification here
-              }
-            });
-          }
-        });
-      } catch (error) {
+      })
+      .catch((error: unknown) => {
         console.error('[SW] Service Worker registration failed:', error);
-      }
-    };
-
-    registerSW();
-
-    // Listen for messages from service worker
-    const handleMessage = (event: MessageEvent) => {
-      const { type, data } = event.data;
-      
-      switch (type) {
-        case 'START_SEEDING_REQUEST':
-          console.log('[SW] Request to start seeding:', data.infoHash);
-          // This would be handled by the WebTorrent integration
-          break;
-        case 'STOP_SEEDING_REQUEST':
-          console.log('[SW] Request to stop seeding:', data.infoHash);
-          // This would be handled by the WebTorrent integration
-          break;
-        default:
-          console.log('[SW] Message from SW:', type, data);
-      }
-    };
-
-    navigator.serviceWorker.addEventListener('message', handleMessage);
+      });
 
     return () => {
-      navigator.serviceWorker.removeEventListener('message', handleMessage);
+      cancelled = true;
     };
   }, []);
 
-  const sendMessage = useCallback(async <T,>(type: string, data?: unknown): Promise<T> => {
-    return new Promise((resolve, reject) => {
-      if (!registration?.active) {
-        reject(new Error('Service Worker not active'));
-        return;
-      }
+  const sendMessage = useCallback(
+    async <T,>(type: string, data?: unknown): Promise<T> => {
+      if (!registration?.active) throw new Error('Service Worker not active');
 
-      const channel = new MessageChannel();
-      
-      channel.port1.onmessage = (event) => {
-        resolve(event.data as T);
-      };
+      return new Promise<T>((resolve, reject) => {
+        const channel = new MessageChannel();
+        const timeout = window.setTimeout(() => {
+          channel.port1.close();
+          reject(new Error('Service Worker did not respond'));
+        }, 10_000);
 
-      registration.active.postMessage(
-        { type, data },
-        [channel.port2]
-      );
-    });
-  }, [registration]);
+        channel.port1.onmessage = (event: MessageEvent<T & { success?: boolean; error?: string }>) => {
+          window.clearTimeout(timeout);
+          channel.port1.close();
+          if (event.data && event.data.success === false) {
+            reject(new Error(event.data.error || 'Service Worker request failed'));
+            return;
+          }
+          resolve(event.data as T);
+        };
 
-  const startSeeding = useCallback(async (infoHash: string) => {
-    await sendMessage('START_SEEDING', { infoHash });
-  }, [sendMessage]);
+        registration.active!.postMessage({ type, data }, [channel.port2]);
+      });
+    },
+    [registration]
+  );
 
-  const stopSeeding = useCallback(async (infoHash: string) => {
-    await sendMessage('STOP_SEEDING', { infoHash });
-  }, [sendMessage]);
-
-  const cacheTrack = useCallback(async (trackId: string, url: string) => {
-    await sendMessage('CACHE_TRACK', { trackId, url });
-  }, [sendMessage]);
-
-  const getSeedingStatus = useCallback(async () => {
-    return sendMessage<{ infoHash: string; active: boolean }[]>('GET_SEEDING_STATUS');
-  }, [sendMessage]);
+  const cacheTrack = useCallback(
+    async (trackId: string, url: string) => {
+      await sendMessage('CACHE_TRACK', { trackId, url });
+    },
+    [sendMessage]
+  );
 
   const clearCache = useCallback(async () => {
     await sendMessage('CLEAR_CACHE');
   }, [sendMessage]);
 
-  // Request background sync permission
-  const requestBackgroundSync = useCallback(async () => {
-    if (!registration || !('sync' in registration)) {
-      console.log('[SW] Background Sync not supported');
-      return false;
-    }
-
-    try {
-      await (registration as ServiceWorkerRegistration & { sync: { register: (tag: string) => Promise<void> } }).sync.register('background-seed');
-      console.log('[SW] Background sync registered');
-      return true;
-    } catch (error) {
-      console.error('[SW] Background sync registration failed:', error);
-      return false;
-    }
-  }, [registration]);
-
-  const value: ServiceWorkerContextType = {
-    isSupported,
-    isRegistered,
-    registration,
-    startSeeding,
-    stopSeeding,
-    cacheTrack,
-    getSeedingStatus,
-    clearCache,
-  };
-
   return (
-    <ServiceWorkerContext.Provider value={value}>
-      <NotificationProvider>
-        {children}
-      </NotificationProvider>
+    <ServiceWorkerContext.Provider
+      value={{ isSupported, isRegistered, registration, cacheTrack, clearCache }}
+    >
+      <NotificationProvider>{children}</NotificationProvider>
     </ServiceWorkerContext.Provider>
   );
 };

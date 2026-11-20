@@ -6,7 +6,7 @@ export interface Track {
   artist: string;
   album: string;
   duration: number;
-  magnetUri?: string;
+  streamUrl?: string | null;
   ipfsCid?: string;
   coverArtUrl?: string;
 }

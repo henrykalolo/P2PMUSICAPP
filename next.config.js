@@ -1,14 +1,15 @@
 /** @type {import('next').NextConfig} */
 const path = require('path');
-const fs = require('fs');
 const globalPolyfillPath = path.join(__dirname, 'src/lib/polyfills/global-polyfill.js');
 
 const nextConfig = {
   images: {
     unoptimized: true,
   },
-  experimental: {
-    turbo: {}
+  // Type safety is enforced by `npm run typecheck`; keep production builds
+  // deterministic instead of depending on the deprecated `next lint` step.
+  eslint: {
+    ignoreDuringBuilds: true,
   },
   // Webpack configuration for polyfills
   webpack: (config, { isServer }) => {

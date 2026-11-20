@@ -165,8 +165,8 @@ export default function CommunityPage() {
           <div className="mt-12 p-6 bg-muted rounded-lg">
             <h2 className="text-xl font-semibold mb-4">Trust Score & Reputation</h2>
             <p className="text-muted-foreground mb-4">
-              Your trust score reflects your contributions to the P2P network. Higher scores 
-              give you priority in the network and unlock badges.
+              Your trust score reflects your activity and reputation on the platform. Higher
+              scores unlock badges and improve discovery ranking.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="p-4 bg-background rounded-lg border">

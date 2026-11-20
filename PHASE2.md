@@ -1,3 +1,5 @@
+> **Historical planning document.** P2P-first features described here are not active in the current server-authoritative architecture. See [ARCHITECTURE.md](./ARCHITECTURE.md).
+
 # Phase 2: Beta Release - Implementation Summary
 
 ## Overview

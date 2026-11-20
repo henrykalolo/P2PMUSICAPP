@@ -1,3 +1,5 @@
+> **Historical planning document.** Not implemented as described. See [ARCHITECTURE.md](./ARCHITECTURE.md) for current behavior.
+
 # Phase 3: Production Release - Implementation Plan
 
 ## Overview

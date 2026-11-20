@@ -1,3 +1,5 @@
+> **Historical planning document.** Authoritative implementation docs are [README.md](./README.md) and [ARCHITECTURE.md](./ARCHITECTURE.md).
+
 # Decentralized P2P Music Platform: Technical Specification
 
 > **Version:** 2.1  

@@ -5,8 +5,17 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Upload, FileAudio, X, Loader2, Edit3, Image as ImageIcon } from 'lucide-react';
-import { UnifiedStorage, StorageSystem, StorageOptions, StorageResult } from '@/lib/storage/unifiedStorage';
 import { parseBlob } from 'music-metadata';
+
+export interface StorageResult {
+  fileId: string;
+  url: string;
+  storageType: string;
+  size: number;
+  mimeType: string;
+  instantReady: boolean;
+  ipfsCid?: string | null;
+}
 
 interface UploadComponentProps {
   onUploadComplete?: (metadata: {
@@ -206,74 +215,45 @@ export const UploadComponent: React.FC<UploadComponentProps> = ({
     setUploadProgress(0);
 
     try {
-      // Step 1: Initialize upload with backend
-      const initResponse = await fetch('/api/upload', {
+      // Single authorized multipart request: the server stores the bytes,
+      // encrypts them at rest, and creates the track record atomically.
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      formData.append('title', metadata.title);
+      formData.append('artist', metadata.artist);
+      formData.append('album', metadata.album);
+      formData.append('genre', metadata.genre);
+      formData.append('year', String(metadata.year));
+      formData.append('duration', String(metadata.duration));
+      if (metadata.coverArtUrl) formData.append('coverArtUrl', metadata.coverArtUrl);
+
+      setUploadProgress(30);
+
+      const response = await fetch('/api/tracks', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
           Authorization: `Bearer ${localStorage.getItem('token')}`,
         },
-        body: JSON.stringify({
-          fileName: selectedFile.name,
-          fileSize: selectedFile.size,
-          mimeType: selectedFile.type,
-        }),
+        body: formData,
       });
 
-      if (!initResponse.ok) {
-        const error = await initResponse.json();
-        throw new Error(error.error || 'Failed to initialize upload');
-      }
-
-      // Step 2: Upload to unified storage system
-      const storageOptions: StorageOptions = {
-        onProgress: (progress) => {
-          setUploadProgress(Math.min(80, Math.round(progress)));
-        },
-        cache: true,
-      };
-
-      const storageResult = await UnifiedStorage.uploadFile(
-        selectedFile,
-        metadata,
-        {
-          ...storageOptions,
-          redundant: true, // Upload to multiple systems for redundancy
-        }
-      );
-
-      setUploadProgress(90);
-
-      // Step 3: Save to backend database
-      const saveResponse = await fetch('/api/tracks', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`,
-        },
-        body: JSON.stringify({
-          title: metadata.title,
-          artist: metadata.artist,
-          album: metadata.album,
-          genre: metadata.genre,
-          year: metadata.year,
-          duration: metadata.duration,
-          ipfsCid: storageResult.ipfsCid || null,
-          magnetUri: storageResult.magnetUri || null,
-          storageSystem: storageResult.system,
-          serverStorageId: (storageResult as any).serverId || null,
-          fileSize: selectedFile.size,
-          mimeType: selectedFile.type,
-          coverArtUrl: metadata.coverArtUrl || null,
-        }),
-      });
-
-      if (!saveResponse.ok) {
-        const error = await saveResponse.json();
-        throw new Error(error.error || 'Failed to save track');
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || 'Failed to upload track');
       }
 
       setUploadProgress(100);
+
+      const data = await response.json();
+      const storageResult: StorageResult = {
+        fileId: data.track.id,
+        url: data.track.streamUrl || '',
+        storageType: data.track.storageType,
+        size: data.track.fileSize,
+        mimeType: data.track.mimeType,
+        instantReady: Boolean(data.track.instantReady),
+        ipfsCid: data.track.ipfsCid,
+      };
 
       if (onUploadComplete) {
         onUploadComplete({
@@ -324,7 +304,7 @@ export const UploadComponent: React.FC<UploadComponentProps> = ({
             or click to browse (MP3, OGG, WAV, FLAC, M4A up to 100MB)
           </p>
           <p className="text-sm text-blue-600 mb-4">
-            Automatic fallback system: IPFS → WebTorrent → Local Storage
+            Stored securely on the server and playable immediately; IPFS is optional.
           </p>
           <input
             type="file"

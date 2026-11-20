@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { UnifiedMusicPlayer } from '@/components/player/UnifiedMusicPlayer';
-import { StorageSystem } from '@/lib/storage/unifiedStorage';
 import { Button } from '@/components/ui/button';
 import {
   Heart,
@@ -13,10 +12,8 @@ import {
   Send,
   Clock,
   Check,
-  Copy,
   Link as LinkIcon,
   X,
-  Zap,
   Award,
   MoreHorizontal,
   Trash2,
@@ -50,8 +47,8 @@ interface FeedItemProps {
     album: string;
     genre: string;
     duration: number;
-    magnetUri?: string;
     ipfsCid?: string;
+    streamUrl?: string | null;
     storageType?: string;
     serverStorageId?: string;
     coverArtUrl?: string;
@@ -159,22 +156,15 @@ const BadgeNotification: React.FC<{
 const ShareModal: React.FC<{
   isOpen: boolean;
   onClose: () => void;
-  magnetUri: string;
   postId: string;
   title: string;
   onCopy: (text: string, label: string) => void;
-}> = ({ isOpen, onClose, magnetUri, postId, title, onCopy }) => {
+}> = ({ isOpen, onClose, postId, title, onCopy }) => {
   if (!isOpen) return null;
 
-  const shareableUrl = `${window.location.origin}/track/${postId}`;
+  const shareableUrl = `${window.location.origin}/post/${postId}`;
 
   const shareOptions = [
-    {
-      label: 'Copy Magnet Link',
-      icon: Copy,
-      action: () => onCopy(magnetUri, 'Magnet link copied!'),
-      description: 'Share via torrent clients',
-    },
     {
       label: 'Copy Track URL',
       icon: LinkIcon,
@@ -188,7 +178,7 @@ const ShareModal: React.FC<{
       try {
         await navigator.share({
           title: `Check out "${title}" on P2PMusic`,
-          text: `Listen to "${title}" on P2PMusic - Decentralized music streaming`,
+          text: `Listen to "${title}" on P2PMusic`,
           url: shareableUrl,
         });
       } catch (err) {
@@ -332,11 +322,6 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
   // Refs
   const commentsRef = useRef<HTMLDivElement>(null);
   const commentInputRef = useRef<HTMLTextAreaElement>(null);
-
-  // Get seeding status from player store
-  const { isSeeding: globalIsSeeding, currentTrack } = usePlayerStore();
-  const isCurrentlyPlaying = currentTrack?.magnetUri === post.magnetUri;
-  const isSeeding = isCurrentlyPlaying && globalIsSeeding;
 
   // Fetch comments when comments section is opened
   const fetchComments = useCallback(async () => {
@@ -592,7 +577,7 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
   // Set timestamp from current playback position
   const setTimestampFromPlayback = () => {
     const { currentTrack, progress } = usePlayerStore.getState();
-    if (currentTrack?.magnetUri === post.magnetUri && post.duration > 0) {
+    if (currentTrack?.id === post.id && post.duration > 0) {
       const currentSeconds = Math.floor((progress / 100) * post.duration);
       setCommentTimestamp(currentSeconds);
     }
@@ -621,7 +606,6 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
       <ShareModal
         isOpen={showShareModal}
         onClose={() => setShowShareModal(false)}
-        magnetUri={post.magnetUri || ''}
         postId={post.id}
         title={post.title}
         onCopy={handleCopy}
@@ -707,14 +691,6 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
             })}
           </p>
         </div>
-        
-        {/* Seeding Badge */}
-        {isSeeding && (
-          <div className="flex items-center gap-1.5 bg-green-500/10 text-green-600 px-3 py-1.5 rounded-full text-xs font-medium animate-pulse">
-            <Zap className="h-3.5 w-3.5 fill-current" />
-            Seeding
-          </div>
-        )}
       </div>
 
       {/* Track Info */}
@@ -742,49 +718,15 @@ export const EnhancedFeedItem: React.FC<FeedItemProps> = ({ post, currentUserId 
         </div>
       )}
 
-      {/* P2P Player - Shows for all storage systems with fallback */}
+      {/* Authoritative player with signed, range-capable media URL */}
       <div className="mb-4">
-        {post.ipfsCid ? (
-          <UnifiedMusicPlayer 
-            trackId={post.ipfsCid} 
-            title={post.title}
-            artist={post.artist}
-            preferredStorage={StorageSystem.IPFS}
-            serverStorageId={post.serverStorageId}
-          />
-        ) : post.magnetUri ? (
-          <UnifiedMusicPlayer 
-            trackId={post.magnetUri} 
-            title={post.title}
-            artist={post.artist}
-            preferredStorage={StorageSystem.WEB_TORRENT}
-            serverStorageId={post.serverStorageId}
-          />
-        ) : post.storageType === 'local' || post.storageType === 'indexeddb' ? (
-          <UnifiedMusicPlayer 
-            trackId={`local-${post.id}`} 
-            title={post.title}
-            artist={post.artist}
-            preferredStorage={StorageSystem.INDEXED_DB}
-            serverStorageId={post.serverStorageId}
-          />
-        ) : post.storageType === 'cache-api' ? (
-          <UnifiedMusicPlayer 
-            trackId={`cache-${post.id}`} 
-            title={post.title}
-            artist={post.artist}
-            preferredStorage={StorageSystem.CACHE_API}
-            serverStorageId={post.serverStorageId}
-          />
-        ) : (
-          /* Fallback: try using track ID directly for any other storage type */
-          <UnifiedMusicPlayer 
-            trackId={post.id} 
-            title={post.title}
-            artist={post.artist}
-            serverStorageId={post.serverStorageId}
-          />
-        )}
+        <UnifiedMusicPlayer
+          trackId={post.id}
+          src={post.streamUrl}
+          title={post.title}
+          artist={post.artist}
+          poster={post.coverArtUrl}
+        />
       </div>
 
          {/* Social Actions */}

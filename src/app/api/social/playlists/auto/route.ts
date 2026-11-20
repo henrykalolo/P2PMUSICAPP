@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { verifyToken } from '@/lib/auth/jwt';
+import { createTrackStreamUrl } from '@/lib/media/signed-url';
 
 // POST /api/social/playlists/auto - Generate auto-playlist based on preferences
 export async function POST(request: NextRequest) {
@@ -57,7 +58,8 @@ export async function POST(request: NextRequest) {
         p.genre,
         p.duration_seconds,
         p.cover_art_url,
-        p.magnet_uri,
+        p.storage_type,
+        p.server_storage_id,
         p.ipfs_cid,
         p.created_at,
         u.id as author_id,
@@ -93,7 +95,7 @@ export async function POST(request: NextRequest) {
 
     queryText += `
       GROUP BY p.id, p.title, p.artist, p.album, p.genre, p.duration_seconds,
-               p.cover_art_url, p.magnet_uri, p.ipfs_cid, p.created_at,
+               p.cover_art_url, p.storage_type, p.server_storage_id, p.ipfs_cid, p.created_at,
                u.id, u.username, u.avatar_url
     `;
 
@@ -117,8 +119,10 @@ export async function POST(request: NextRequest) {
       genre: row.genre,
       duration: row.duration_seconds,
       coverArtUrl: row.cover_art_url,
-      magnetUri: row.magnet_uri,
       ipfsCid: row.ipfs_cid,
+      storageType: row.storage_type,
+      serverStorageId: row.server_storage_id,
+      streamUrl: createTrackStreamUrl(row.id, row.storage_type, row.server_storage_id, row.ipfs_cid),
       createdAt: row.created_at,
       likesCount: parseInt(row.likes_count),
       commentsCount: parseInt(row.comments_count),

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { verifyToken } from '@/lib/auth/jwt';
+import { createTrackStreamUrl } from '@/lib/media/signed-url';
 
 // GET /api/social/playlists - Get user's playlists
 export async function GET(request: NextRequest) {
@@ -79,7 +80,8 @@ export async function GET(request: NextRequest) {
           p.genre,
           p.duration_seconds,
           p.cover_art_url,
-          p.magnet_uri,
+          p.storage_type,
+          p.server_storage_id,
           p.ipfs_cid,
           t.author_id,
           t.username as author_username,
@@ -104,8 +106,15 @@ export async function GET(request: NextRequest) {
           genre: row.genre,
           duration: row.duration_seconds,
           coverArtUrl: row.cover_art_url,
-          magnetUri: row.magnet_uri,
           ipfsCid: row.ipfs_cid,
+          storageType: row.storage_type,
+          serverStorageId: row.server_storage_id,
+          streamUrl: createTrackStreamUrl(
+            row.track_id,
+            row.storage_type,
+            row.server_storage_id,
+            row.ipfs_cid
+          ),
           author: {
             id: row.author_id,
             username: row.author_username,

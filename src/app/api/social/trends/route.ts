@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { verifyToken } from '@/lib/auth/jwt';
+import { createTrackStreamUrl } from '@/lib/media/signed-url';
 
 // GET /api/social/trends - Get social interaction trends
 export async function GET(request: NextRequest) {
@@ -38,14 +39,15 @@ export async function GET(request: NextRequest) {
 
     // Get popular tracks (most liked)
     const popularTracksResult = await query(`
-      SELECT p.id, p.title, p.artist, p.album, p.genre, p.cover_art_url,
-             COUNT(l.user_id) as likes_count,
-             u.username as author_username,
-             u.avatar_url as author_avatar
+      SELECT p.id, p.title, p.artist, p.album, p.genre, p.duration_seconds,
+             p.cover_art_url, p.storage_type, p.server_storage_id, p.ipfs_cid,
+             p.created_at, COUNT(l.user_id) as likes_count,
+             (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comments_count,
+             u.id as author_id, u.username as author_username, u.avatar_url as author_avatar
       FROM posts p
       JOIN users u ON p.author_id = u.id
       LEFT JOIN likes l ON p.id = l.post_id
-      GROUP BY p.id, u.username, u.avatar_url
+      GROUP BY p.id, u.id, u.username, u.avatar_url
       ORDER BY likes_count DESC
       LIMIT 5
     `);
@@ -66,8 +68,36 @@ export async function GET(request: NextRequest) {
       LIMIT 5
     `, [payload.userId]);
 
+    const tracks = popularTracksResult.rows.map((track: Record<string, any>) => ({
+      id: track.id,
+      title: track.title,
+      artist: track.artist,
+      album: track.album,
+      genre: track.genre,
+      duration: track.duration_seconds,
+      coverArtUrl: track.cover_art_url,
+      ipfsCid: track.ipfs_cid,
+      storageType: track.storage_type,
+      serverStorageId: track.server_storage_id,
+      streamUrl: createTrackStreamUrl(
+        track.id,
+        track.storage_type,
+        track.server_storage_id,
+        track.ipfs_cid
+      ),
+      createdAt: track.created_at,
+      likesCount: Number(track.likes_count),
+      commentsCount: Number(track.comments_count),
+      author: {
+        id: track.author_id,
+        username: track.author_username,
+        avatarUrl: track.author_avatar,
+      },
+    }));
+
     return NextResponse.json({
       success: true,
+      tracks,
       trends: {
         trendingArtists: trendingArtistsResult.rows.map(artist => ({
           id: artist.id,
@@ -77,19 +107,7 @@ export async function GET(request: NextRequest) {
           badge: artist.badge,
           followersCount: parseInt(artist.followers_count)
         })),
-        popularTracks: popularTracksResult.rows.map(track => ({
-          id: track.id,
-          title: track.title,
-          artist: track.artist,
-          album: track.album,
-          genre: track.genre,
-          coverArtUrl: track.cover_art_url,
-          likesCount: parseInt(track.likes_count),
-          author: {
-            username: track.author_username,
-            avatarUrl: track.author_avatar
-          }
-        })),
+        popularTracks: tracks,
         recentComments: recentCommentsResult.rows.map(comment => ({
           id: comment.id,
           content: comment.content,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { verifyToken } from '@/lib/auth/jwt';
+import { createTrackStreamUrl } from '@/lib/media/signed-url';
 
 // GET /api/social/likes?userId=[userId] - Get user's liked tracks
 export async function GET(request: NextRequest) {
@@ -30,7 +31,7 @@ export async function GET(request: NextRequest) {
     // Fetch liked tracks from database
     const likesResult = await query(`
       SELECT p.id, p.title, p.artist, p.album, p.genre, p.duration_seconds,
-             p.magnet_uri, p.ipfs_cid, p.cover_art_url, p.created_at,
+             p.storage_type, p.server_storage_id, p.ipfs_cid, p.cover_art_url, p.created_at,
              u.id as author_id, u.username as author_username, u.avatar_url as author_avatar
       FROM likes l
       JOIN posts p ON l.post_id = p.id
@@ -64,8 +65,15 @@ export async function GET(request: NextRequest) {
           album: track.album,
           genre: track.genre,
           duration: track.duration_seconds,
-          magnetUri: track.magnet_uri,
           ipfsCid: track.ipfs_cid,
+          storageType: track.storage_type,
+          serverStorageId: track.server_storage_id,
+          streamUrl: createTrackStreamUrl(
+            track.id,
+            track.storage_type,
+            track.server_storage_id,
+            track.ipfs_cid
+          ),
           coverArtUrl: track.cover_art_url,
           createdAt: track.created_at,
           likesCount: parseInt(likesCountResult.rows[0].count),

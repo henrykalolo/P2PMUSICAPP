@@ -46,8 +46,8 @@ export default function PrivacyPage() {
             <ul className="list-disc list-inside text-muted-foreground mb-4 space-y-2">
               <li>Account information (username, email)</li>
               <li>Music metadata (titles, artists, albums)</li>
-              <li>IPFS content identifiers (CIDs) for distributed storage</li>
-              <li>Trust scores and network participation data</li>
+              <li>Optional IPFS content identifiers (CIDs) for secondary copies</li>
+              <li>Trust scores and social activity data</li>
             </ul>
 
             <h2 className="text-2xl font-semibold mt-8 mb-4">2. How We Use Your Information</h2>
@@ -55,10 +55,10 @@ export default function PrivacyPage() {
               Your information is used solely for:
             </p>
             <ul className="list-disc list-inside text-muted-foreground mb-4 space-y-2">
-              <li>Providing the P2P music streaming service</li>
+              <li>Providing music upload and streaming</li>
               <li>Maintaining your account and preferences</li>
               <li>Facilitating content discovery between users</li>
-              <li>Network optimization and trust scoring</li>
+              <li>Trust scoring and storage management</li>
             </ul>
 
             <h2 className="text-2xl font-semibold mt-8 mb-4">3. Data Security</h2>
@@ -66,21 +66,21 @@ export default function PrivacyPage() {
               We take security seriously:
             </p>
             <ul className="list-disc list-inside text-muted-foreground mb-4 space-y-2">
-              <li>All music files are encrypted with AES-256-GCM before distribution</li>
-              <li>Authentication uses secure JWT tokens</li>
-              <li>P2P connections are encrypted with WebRTC security</li>
-              <li>No centralized storage of unencrypted content</li>
+              <li>Audio is encrypted at rest with AES-256-GCM in 1 MiB chunks</li>
+              <li>Authentication uses strong JWT secrets and bcrypt password hashes</li>
+              <li>Playback uses short-lived, track-scoped signed URLs</li>
+              <li>Storage paths are validated as UUIDs to prevent traversal</li>
             </ul>
 
-            <h2 className="text-2xl font-semibold mt-8 mb-4">4. P2P Network Privacy</h2>
+            <h2 className="text-2xl font-semibold mt-8 mb-4">4. Storage and Playback Privacy</h2>
             <p className="text-muted-foreground mb-4">
-              As a decentralized platform:
+              Playback is normally served by the application server:
             </p>
             <ul className="list-disc list-inside text-muted-foreground mb-4 space-y-2">
-              <li>Content is distributed across the peer-to-peer network</li>
-              <li>Only authorized followers can access encrypted content</li>
-              <li>Magnet links contain encrypted references only</li>
-              <li>Your IP address is visible to peers you connect with</li>
+              <li>Server-stored audio is encrypted at rest and served via authorized URLs</li>
+              <li>Private media is not cached publicly</li>
+              <li>IPFS is optional and only used for tracks without a server copy</li>
+              <li>Using an external IPFS gateway shares your IP address with that gateway</li>
             </ul>
 
             <h2 className="text-2xl font-semibold mt-8 mb-4">5. Your Rights</h2>

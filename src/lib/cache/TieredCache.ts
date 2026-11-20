@@ -1,487 +1,405 @@
 /**
- * Tiered Cache Implementation for Phase 3
- * Provides multi-level caching: Memory -> IndexedDB -> Service Worker
- * Optimizes P2P content retrieval and reduces redundant downloads
+ * Tiered Cache System for P2P Music Platform
+ * Multi-tier caching to minimize redundant P2P downloads and improve playback latency
  */
 
-interface CacheTier {
+export interface CacheTier {
   name: 'memory' | 'indexeddb' | 'service-worker';
   maxSize: number;
   ttl: number;
   priority: number;
 }
 
-interface CacheEntry {
+export interface CacheEntry {
   data: Uint8Array;
   timestamp: number;
-  accessCount: number;
   size: number;
+  accessCount: number;
+  lastAccessed: number;
 }
 
-interface CacheStats {
-  hits: number;
-  misses: number;
-  evictions: number;
-  totalSize: number;
-}
+class MemoryCache {
+  private cache: Map<string, CacheEntry> = new Map();
+  private currentSize = 0;
+  private maxSize: number;
 
-const DEFAULT_TIERS: CacheTier[] = [
-  { name: 'memory', maxSize: 50 * 1024 * 1024, ttl: 300000, priority: 1 },    // 50MB, 5min
-  { name: 'indexeddb', maxSize: 500 * 1024 * 1024, ttl: 86400000, priority: 2 }, // 500MB, 24h
-  { name: 'service-worker', maxSize: 2000 * 1024 * 1024, ttl: 604800000, priority: 3 } // 2GB, 7d
-];
-
-export class TieredCache {
-  private memoryCache: Map<string, CacheEntry> = new Map();
-  private db: IDBDatabase | null = null;
-  private tiers: CacheTier[];
-  private stats: Map<string, CacheStats> = new Map();
-  private currentMemorySize = 0;
-  private dbName = 'P2PMusicCache';
-  private dbVersion = 1;
-
-  constructor(tiers: CacheTier[] = DEFAULT_TIERS) {
-    this.tiers = tiers;
-    this.initStats();
+  constructor(maxSize: number) {
+    this.maxSize = maxSize;
   }
 
-  /**
-   * Initialize the cache system
-   */
-  async initialize(): Promise<void> {
-    await this.initIndexedDB();
-    this.startCleanupInterval();
-    console.log('[TieredCache] Initialized with tiers:', this.tiers.map(t => t.name).join(', '));
-  }
-
-  /**
-   * Get a chunk from cache (tries memory -> indexeddb -> service worker)
-   */
-  async getChunk(infoHash: string, pieceIndex: number): Promise<Uint8Array | null> {
-    const key = this.getKey(infoHash, pieceIndex);
-
-    // Try memory cache first (fastest)
-    const memChunk = this.getFromMemory(key);
-    if (memChunk) {
-      this.recordHit('memory');
-      return memChunk;
-    }
-
-    // Fall through to IndexedDB
-    const dbChunk = await this.getFromIndexedDB(key);
-    if (dbChunk) {
-      // Promote to memory cache
-      await this.setInMemory(key, dbChunk);
-      this.recordHit('indexeddb');
-      return dbChunk;
-    }
-
-    // Finally check Service Worker cache
-    const swChunk = await this.getFromServiceWorker(key);
-    if (swChunk) {
-      // Promote up the chain
-      await this.setInIndexedDB(key, swChunk);
-      await this.setInMemory(key, swChunk);
-      this.recordHit('service-worker');
-      return swChunk;
-    }
-
-    this.recordMiss();
-    return null;
-  }
-
-  /**
-   * Store a chunk in cache (stores in all tiers)
-   */
-  async setChunk(infoHash: string, pieceIndex: number, data: Uint8Array): Promise<void> {
-    const key = this.getKey(infoHash, pieceIndex);
-
-    // Store in memory
-    await this.setInMemory(key, data);
-
-    // Store in IndexedDB
-    await this.setInIndexedDB(key, data);
-
-    // Store in Service Worker cache (fire and forget)
-    this.setInServiceWorker(key, data).catch(err => {
-      console.warn('[TieredCache] Service Worker cache error:', err);
-    });
-  }
-
-  /**
-   * Check if a chunk exists in any cache tier
-   */
-  async hasChunk(infoHash: string, pieceIndex: number): Promise<boolean> {
-    const key = this.getKey(infoHash, pieceIndex);
-
-    if (this.memoryCache.has(key)) return true;
-    if (await this.hasInIndexedDB(key)) return true;
-    if (await this.hasInServiceWorker(key)) return true;
-
-    return false;
-  }
-
-  /**
-   * Get cache statistics
-   */
-  getStats(): Record<string, CacheStats> {
-    const result: Record<string, CacheStats> = {};
-    for (const [tier, stats] of this.stats) {
-      result[tier] = { ...stats };
-    }
-    return result;
-  }
-
-  /**
-   * Clear all caches
-   */
-  async clear(): Promise<void> {
-    // Clear memory
-    this.memoryCache.clear();
-    this.currentMemorySize = 0;
-
-    // Clear IndexedDB
-    if (this.db) {
-      const transaction = this.db.transaction(['chunks'], 'readwrite');
-      const store = transaction.objectStore('chunks');
-      await store.clear();
-    }
-
-    // Clear Service Worker cache
-    if ('caches' in window) {
-      const cache = await caches.open('p2p-chunks-v1');
-      await cache.keys().then(keys => {
-        return Promise.all(keys.map(key => cache.delete(key)));
-      });
-    }
-
-    console.log('[TieredCache] All caches cleared');
-  }
-
-  /**
-   * Preload chunks for a torrent
-   */
-  async preloadChunks(infoHash: string, pieceIndices: number[]): Promise<void> {
-    // This would be called by the predictive preloader
-    // Implementation depends on integration with WebTorrent
-    console.log(`[TieredCache] Preloading ${pieceIndices.length} chunks for ${infoHash}`);
-  }
-
-  // Private methods
-
-  private getKey(infoHash: string, pieceIndex: number): string {
-    return `${infoHash}:${pieceIndex}`;
-  }
-
-  private initStats(): void {
-    for (const tier of this.tiers) {
-      this.stats.set(tier.name, {
-        hits: 0,
-        misses: 0,
-        evictions: 0,
-        totalSize: 0
-      });
-    }
-  }
-
-  private async initIndexedDB(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const request = indexedDB.open(this.dbName, this.dbVersion);
-
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => {
-        this.db = request.result;
-        resolve();
-      };
-
-      request.onupgradeneeded = (event) => {
-        const db = (event.target as IDBOpenDBRequest).result;
-        if (!db.objectStoreNames.contains('chunks')) {
-          const store = db.createObjectStore('chunks', { keyPath: 'key' });
-          store.createIndex('timestamp', 'timestamp', { unique: false });
-          store.createIndex('size', 'size', { unique: false });
-        }
-      };
-    });
-  }
-
-  private getFromMemory(key: string): Uint8Array | null {
-    const entry = this.memoryCache.get(key);
+  async get(key: string): Promise<Uint8Array | null> {
+    const entry = this.cache.get(key);
     if (!entry) return null;
 
-    // Check TTL
-    const tier = this.tiers.find(t => t.name === 'memory')!;
-    if (Date.now() - entry.timestamp > tier.ttl) {
-      this.memoryCache.delete(key);
-      this.currentMemorySize -= entry.size;
+    if (this.isExpired(entry)) {
+      this.remove(key);
       return null;
     }
 
-    // Update access stats
     entry.accessCount++;
-    entry.timestamp = Date.now();
-
+    entry.lastAccessed = Date.now();
     return entry.data;
   }
 
-  private async setInMemory(key: string, data: Uint8Array): Promise<void> {
-    const tier = this.tiers.find(t => t.name === 'memory')!;
+  async set(key: string, data: Uint8Array): Promise<void> {
+    const size = data.length;
 
-    // Check if we need to evict
-    while (this.currentMemorySize + data.length > tier.maxSize && this.memoryCache.size > 0) {
-      this.evictFromMemory();
+    // Evict if necessary
+    while (this.currentSize + size > this.maxSize && this.cache.size > 0) {
+      this.evictLRU();
     }
 
-    // Store if there's space
-    if (this.currentMemorySize + data.length <= tier.maxSize) {
-      this.memoryCache.set(key, {
+    if (this.currentSize + size <= this.maxSize) {
+      const entry: CacheEntry = {
         data,
         timestamp: Date.now(),
+        size,
         accessCount: 1,
-        size: data.length
-      });
-      this.currentMemorySize += data.length;
+        lastAccessed: Date.now(),
+      };
+      this.cache.set(key, entry);
+      this.currentSize += size;
     }
   }
 
-  private evictFromMemory(): void {
-    // LRU eviction: remove least recently accessed entry
-    let oldestKey: string | null = null;
-    let oldestTime = Infinity;
+  async delete(key: string): Promise<void> {
+    this.remove(key);
+  }
 
-    for (const [key, entry] of this.memoryCache) {
-      if (entry.timestamp < oldestTime) {
-        oldestTime = entry.timestamp;
+  async clear(): Promise<void> {
+    this.cache.clear();
+    this.currentSize = 0;
+  }
+
+  private remove(key: string): void {
+    const entry = this.cache.get(key);
+    if (entry) {
+      this.currentSize -= entry.size;
+      this.cache.delete(key);
+    }
+  }
+
+  private isExpired(entry: CacheEntry): boolean {
+    const ttl = 5 * 60 * 1000; // 5 minutes for memory cache
+    return Date.now() - entry.timestamp > ttl;
+  }
+
+  private evictLRU(): void {
+    let oldestKey: string | null = null;
+    let oldestAccess = Infinity;
+
+    for (const [key, entry] of this.cache.entries()) {
+      if (entry.lastAccessed < oldestAccess) {
+        oldestAccess = entry.lastAccessed;
         oldestKey = key;
       }
     }
 
     if (oldestKey) {
-      const entry = this.memoryCache.get(oldestKey)!;
-      this.currentMemorySize -= entry.size;
-      this.memoryCache.delete(oldestKey);
-      this.recordEviction('memory');
+      this.remove(oldestKey);
     }
   }
+}
 
-  private async getFromIndexedDB(key: string): Promise<Uint8Array | null> {
-    if (!this.db) return null;
+class IndexedDBCache {
+  private dbName = 'P2PMusicCache';
+  private storeName = 'chunks';
+  private maxSize: number;
+  private currentSize = 0;
+
+  constructor(maxSize: number) {
+    this.maxSize = maxSize;
+  }
+
+  private async openDB(): Promise<IDBDatabase> {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(this.dbName, 1);
+
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(this.storeName)) {
+          const store = db.createObjectStore(this.storeName, { keyPath: 'key' });
+          store.createIndex('timestamp', 'timestamp', { unique: false });
+          store.createIndex('lastAccessed', 'lastAccessed', { unique: false });
+        }
+      };
+
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async get(key: string): Promise<Uint8Array | null> {
+    const db = await this.openDB();
 
     return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction(['chunks'], 'readonly');
-      const store = transaction.objectStore('chunks');
+      const transaction = db.transaction(this.storeName, 'readonly');
+      const store = transaction.objectStore(this.storeName);
       const request = store.get(key);
 
       request.onsuccess = () => {
-        const result = request.result;
-        if (!result) {
+        const entry = request.result;
+        if (!entry) {
           resolve(null);
           return;
         }
 
         // Check TTL
-        const tier = this.tiers.find(t => t.name === 'indexeddb')!;
-        if (Date.now() - result.timestamp > tier.ttl) {
-          // Delete expired entry
-          this.deleteFromIndexedDB(key);
+        const ttl = 24 * 60 * 60 * 1000; // 24 hours
+        if (Date.now() - entry.timestamp > ttl) {
+          this.delete(key);
           resolve(null);
           return;
         }
 
-        // Update access time
-        this.updateIndexedDBAccessTime(key);
+        // Update access info
+        entry.accessCount++;
+        entry.lastAccessed = Date.now();
+        const updateTransaction = db.transaction(this.storeName, 'readwrite');
+        const updateStore = updateTransaction.objectStore(this.storeName);
+        updateStore.put(entry);
 
-        resolve(new Uint8Array(result.data));
+        resolve(new Uint8Array(entry.data));
       };
 
       request.onerror = () => reject(request.error);
     });
   }
 
-  private async setInIndexedDB(key: string, data: Uint8Array): Promise<void> {
-    if (!this.db) return;
+  async set(key: string, data: Uint8Array): Promise<void> {
+    const db = await this.openDB();
+
+    // Check current size and evict if needed
+    await this.evictIfNeeded(data.length);
 
     return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction(['chunks'], 'readwrite');
-      const store = transaction.objectStore('chunks');
+      const transaction = db.transaction(this.storeName, 'readwrite');
+      const store = transaction.objectStore(this.storeName);
 
-      const request = store.put({
+      const entry = {
         key,
-        data: data.buffer,
+        data: Array.from(data),
         timestamp: Date.now(),
-        size: data.length
-      });
+        size: data.length,
+        accessCount: 1,
+        lastAccessed: Date.now(),
+      };
 
+      const request = store.put(entry);
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
     });
   }
 
-  private async hasInIndexedDB(key: string): Promise<boolean> {
-    if (!this.db) return false;
+  async delete(key: string): Promise<void> {
+    const db = await this.openDB();
 
     return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction(['chunks'], 'readonly');
-      const store = transaction.objectStore('chunks');
-      const request = store.count(key);
-
-      request.onsuccess = () => resolve(request.result > 0);
-      request.onerror = () => reject(request.error);
-    });
-  }
-
-  private async deleteFromIndexedDB(key: string): Promise<void> {
-    if (!this.db) return;
-
-    return new Promise((resolve, reject) => {
-      const transaction = this.db!.transaction(['chunks'], 'readwrite');
-      const store = transaction.objectStore('chunks');
+      const transaction = db.transaction(this.storeName, 'readwrite');
+      const store = transaction.objectStore(this.storeName);
       const request = store.delete(key);
-
       request.onsuccess = () => resolve();
       request.onerror = () => reject(request.error);
     });
   }
 
-  private async updateIndexedDBAccessTime(key: string): Promise<void> {
-    if (!this.db) return;
+  async clear(): Promise<void> {
+    const db = await this.openDB();
 
-    const transaction = this.db.transaction(['chunks'], 'readwrite');
-    const store = transaction.objectStore('chunks');
-    const request = store.get(key);
-
-    request.onsuccess = () => {
-      const data = request.result;
-      if (data) {
-        data.timestamp = Date.now();
-        data.accessCount = (data.accessCount || 0) + 1;
-        store.put(data);
-      }
-    };
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(this.storeName, 'readwrite');
+      const store = transaction.objectStore(this.storeName);
+      const request = store.clear();
+      request.onsuccess = () => resolve();
+      request.onerror = () => reject(request.error);
+    });
   }
 
-  private async getFromServiceWorker(key: string): Promise<Uint8Array | null> {
-    if (!('caches' in window)) return null;
+  private async evictIfNeeded(newDataSize: number): Promise<void> {
+    // Simple eviction - clear old entries if approaching limit
+    const db = await this.openDB();
+
+    return new Promise((resolve) => {
+      const transaction = db.transaction(this.storeName, 'readonly');
+      const store = transaction.objectStore(this.storeName);
+      const index = store.index('lastAccessed');
+      const request = index.openCursor(null, 'prev'); // Newest first
+
+      request.onsuccess = () => {
+        // Simplified - just resolve for now
+        resolve();
+      };
+      request.onerror = () => resolve();
+    });
+  }
+}
+
+class ServiceWorkerCache {
+  private cacheName = 'p2p-audio-cache-v1';
+  private maxSize: number;
+
+  constructor(maxSize: number) {
+    this.maxSize = maxSize;
+  }
+
+  async get(key: string): Promise<Uint8Array | null> {
+    if (typeof caches === 'undefined') return null;
 
     try {
-      const cache = await caches.open('p2p-chunks-v1');
-      const response = await cache.match(`/cache/${key}`);
+      const cache = await caches.open(this.cacheName);
+      const response = await cache.match(new Request(`/cache/${key}`));
 
       if (!response) return null;
 
-      const buffer = await response.arrayBuffer();
-      return new Uint8Array(buffer);
-    } catch (err) {
-      console.warn('[TieredCache] Service Worker cache read error:', err);
+      const arrayBuffer = await response.arrayBuffer();
+      return new Uint8Array(arrayBuffer);
+    } catch {
       return null;
     }
   }
 
-  private async setInServiceWorker(key: string, data: Uint8Array): Promise<void> {
-    if (!('caches' in window)) return;
+  async set(key: string, data: Uint8Array): Promise<void> {
+    if (typeof caches === 'undefined') return;
 
     try {
-      const cache = await caches.open('p2p-chunks-v1');
-      // Convert Uint8Array to Blob for Response constructor
-      const buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
-      const blob = new Blob([buffer], { type: 'application/octet-stream' });
-      const response = new Response(blob, {
+      const cache = await caches.open(this.cacheName);
+      const response = new Response(data as unknown as BodyInit, {
         headers: {
           'Content-Type': 'application/octet-stream',
-          'X-Cache-Timestamp': Date.now().toString()
-        }
+          'Cache-Control': 'max-age=604800', // 7 days
+        },
       });
-      await cache.put(`/cache/${key}`, response);
-    } catch (err) {
-      console.warn('[TieredCache] Service Worker cache write error:', err);
+
+      await cache.put(new Request(`/cache/${key}`), response);
+    } catch (error) {
+      console.error('Service Worker cache set error:', error);
     }
   }
 
-  private async hasInServiceWorker(key: string): Promise<boolean> {
-    if (!('caches' in window)) return false;
+  async delete(key: string): Promise<void> {
+    if (typeof caches === 'undefined') return;
 
     try {
-      const cache = await caches.open('p2p-chunks-v1');
-      const response = await cache.match(`/cache/${key}`);
-      return response !== undefined;
-    } catch {
-      return false;
+      const cache = await caches.open(this.cacheName);
+      await cache.delete(new Request(`/cache/${key}`));
+    } catch (error) {
+      console.error('Service Worker cache delete error:', error);
     }
   }
 
-  private startCleanupInterval(): void {
-    // Run cleanup every 5 minutes
-    setInterval(() => {
-      this.cleanupExpiredEntries();
-    }, 300000);
-  }
+  async clear(): Promise<void> {
+    if (typeof caches === 'undefined') return;
 
-  private async cleanupExpiredEntries(): Promise<void> {
-    const now = Date.now();
-
-    // Clean memory cache
-    for (const [key, entry] of this.memoryCache) {
-      const tier = this.tiers.find(t => t.name === 'memory')!;
-      if (now - entry.timestamp > tier.ttl) {
-        this.currentMemorySize -= entry.size;
-        this.memoryCache.delete(key);
-      }
+    try {
+      await caches.delete(this.cacheName);
+    } catch (error) {
+      console.error('Service Worker cache clear error:', error);
     }
-
-    // Clean IndexedDB (this is more expensive, do it less frequently)
-    if (this.db && Math.random() < 0.1) { // 10% chance each cleanup
-      const transaction = this.db.transaction(['chunks'], 'readonly');
-      const store = transaction.objectStore('chunks');
-      const index = store.index('timestamp');
-      const request = index.openCursor();
-
-      const toDelete: string[] = [];
-      const tier = this.tiers.find(t => t.name === 'indexeddb')!;
-
-      request.onsuccess = () => {
-        const cursor = request.result;
-        if (cursor) {
-          if (now - cursor.value.timestamp > tier.ttl) {
-            toDelete.push(cursor.value.key);
-          }
-          cursor.continue();
-        } else {
-          // Delete expired entries
-          toDelete.forEach(key => this.deleteFromIndexedDB(key));
-        }
-      };
-    }
-  }
-
-  private recordHit(tier: string): void {
-    const stats = this.stats.get(tier)!;
-    stats.hits++;
-  }
-
-  private recordMiss(): void {
-    // Record miss in all tiers
-    for (const stats of this.stats.values()) {
-      stats.misses++;
-    }
-  }
-
-  private recordEviction(tier: string): void {
-    const stats = this.stats.get(tier)!;
-    stats.evictions++;
   }
 }
 
-// Singleton instance
-let globalCache: TieredCache | null = null;
+export class TieredCache {
+  private tiers: CacheTier[] = [
+    { name: 'memory', maxSize: 50 * 1024 * 1024, ttl: 300000, priority: 1 },
+    { name: 'indexeddb', maxSize: 500 * 1024 * 1024, ttl: 86400000, priority: 2 },
+    { name: 'service-worker', maxSize: 2000 * 1024 * 1024, ttl: 604800000, priority: 3 },
+  ];
 
-export function getGlobalCache(): TieredCache {
-  if (!globalCache) {
-    globalCache = new TieredCache();
+  private memoryCache: MemoryCache;
+  private indexedDBCache: IndexedDBCache;
+  private serviceWorkerCache: ServiceWorkerCache;
+
+  constructor() {
+    this.memoryCache = new MemoryCache(this.tiers[0].maxSize);
+    this.indexedDBCache = new IndexedDBCache(this.tiers[1].maxSize);
+    this.serviceWorkerCache = new ServiceWorkerCache(this.tiers[2].maxSize);
   }
-  return globalCache;
+
+  /**
+   * Get chunk from cache, trying each tier in priority order
+   */
+  async getChunk(infoHash: string, pieceIndex: number): Promise<Uint8Array | null> {
+    const key = `${infoHash}:${pieceIndex}`;
+
+    // Try memory first (fastest)
+    const memChunk = await this.memoryCache.get(key);
+    if (memChunk) {
+      return memChunk;
+    }
+
+    // Fall through to IndexedDB
+    const dbChunk = await this.indexedDBCache.get(key);
+    if (dbChunk) {
+      // Promote to memory cache
+      await this.memoryCache.set(key, dbChunk);
+      return dbChunk;
+    }
+
+    // Finally check Service Worker cache
+    const swChunk = await this.serviceWorkerCache.get(key);
+    if (swChunk) {
+      // Promote up the chain
+      await this.indexedDBCache.set(key, swChunk);
+      await this.memoryCache.set(key, swChunk);
+      return swChunk;
+    }
+
+    return null;
+  }
+
+  /**
+   * Store chunk in all cache tiers
+   */
+  async setChunk(infoHash: string, pieceIndex: number, data: Uint8Array): Promise<void> {
+    const key = `${infoHash}:${pieceIndex}`;
+
+    // Store in all tiers
+    await Promise.all([
+      this.memoryCache.set(key, data),
+      this.indexedDBCache.set(key, data),
+      this.serviceWorkerCache.set(key, data),
+    ]);
+  }
+
+  /**
+   * Remove chunk from all cache tiers
+   */
+  async invalidateChunk(infoHash: string, pieceIndex: number): Promise<void> {
+    const key = `${infoHash}:${pieceIndex}`;
+
+    await Promise.all([
+      this.memoryCache.delete(key),
+      this.indexedDBCache.delete(key),
+      this.serviceWorkerCache.delete(key),
+    ]);
+  }
+
+  /**
+   * Clear all cache tiers
+   */
+  async clearAll(): Promise<void> {
+    await Promise.all([
+      this.memoryCache.clear(),
+      this.indexedDBCache.clear(),
+      this.serviceWorkerCache.clear(),
+    ]);
+  }
+
+  /**
+   * Get cache statistics
+   */
+  async getStats(): Promise<{
+    memory: { size: number; entries: number };
+    indexedDB: { size: number; entries: number };
+    serviceWorker: { size: number; entries: number };
+  }> {
+    return {
+      memory: { size: 0, entries: 0 }, // Simplified for now
+      indexedDB: { size: 0, entries: 0 },
+      serviceWorker: { size: 0, entries: 0 },
+    };
+  }
 }
 
-export async function initializeGlobalCache(): Promise<void> {
-  const cache = getGlobalCache();
-  await cache.initialize();
-}
+// Export singleton instance
+export const tieredCache = new TieredCache();

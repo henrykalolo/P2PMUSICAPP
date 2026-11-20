@@ -1,67 +1,71 @@
 # P2P Music Platform
 
-A decentralized music streaming and social platform built around WebTorrent, WebRTC, and user-controlled content distribution.
+A music streaming app with a social graph. The current architecture is **server-authoritative with optional P2P/IPFS acceleration**: PostgreSQL is the source of truth, Media bytes are stored on the server (encrypted at rest), and playback always works without any peer or tracker. P2P transports are additive, never required.
 
-## Highlights
+## What actually works
 
-- Peer-to-peer music delivery using WebTorrent and WebRTC
-- Social discovery through trusted connections
-- Privacy-conscious architecture with user-controlled sharing
-- Offline playback through browser caching and service workers
-- Optional distributed storage integrations
+- Email/password auth (JWT), WebAuthn credential tables, onboarding, profiles
+- Track upload with per-user quotas, server-side encryption at rest, instant availability
+- Range-capable audio streaming with short-lived signed URLs (seeking works)
+- Social features: follows, likes, comments, reposts, playlists, notifications
+- Discovery feed, artist pages, admin area, trust-score scaffolding
+- IPFS helpers for optional secondary storage
 
-## Technology
+## Architecture
 
-- Next.js 15 and React 19
-- TypeScript and Tailwind CSS
-- Zustand for client state
-- Web Audio API for audio experiences
-- WebTorrent, WebRTC, and Simple Peer
-- Supabase for authentication, PostgreSQL, and realtime data
+1. **PostgreSQL** — all metadata and relationships (`src/lib/db/schema.sql`)
+2. **Storage** — files written under `STORAGE_DIR`, encrypted per 1 MiB chunk with AES-256-GCM; IV and plaintext size kept in a sidecar file
+3. **Playback** — `/api/media/token` issues a 1-hour scoped token; `/api/media/:trackId` validates it, resolves the file, decrypts only the requested chunks, and returns HTTP 206 responses for range requests
+4. **P2P/IPFS** — optional. A track may be mirrored to IPFS when server quota is exceeded; the media route redirects to the gateway only when no server copy exists
 
-## Requirements
+See [ARCHITECTURE.md](./ARCHITECTURE.md) for details and tradeoffs.
 
-- Node.js 18+
-- pnpm, npm, or yarn
-- Git
-- A Supabase project for authenticated or persistent features
+## Stack
 
-## Installation
+- Next.js 15 (App Router), React 19, TypeScript
+- Tailwind CSS 4, Lucide icons, Zustand
+- PostgreSQL via `pg`, JWT via `jose`, bcrypt for passwords
+- Node crypto for encryption at rest; Helia for optional IPFS
+
+Helia/IPFS libraries remain available for optional secondary storage, but playback always works from the server copy. WebTorrent was removed because it was never wired into upload or playback.
+
+## Getting started
+
+Requirements: Node.js 20+, PostgreSQL 14+.
 
 ```bash
-git clone https://github.com/henrykalolo/P2PMUSICAPP.git
-cd P2PMUSICAPP
 npm install
 cp .env.example .env.local
-```
-
-Set the required Supabase and application values in `.env.local`, then start the development server:
-
-```bash
+# fill in DATABASE_URL, JWT_SECRET, ENCRYPTION_MASTER_KEY
+npm run db:setup
 npm run dev
 ```
 
-Open `http://localhost:3000` in a browser.
-
-## Quality checks
+Create an administrator with:
 
 ```bash
-npm run build
-npm run lint
-npm test
+ADMIN_PASSWORD='a-strong-password' npm run db:seed-admin
 ```
 
-## Documentation
+Open http://localhost:3000.
 
-- [Setup guide](SETUP.md)
-- [Technical specification](TECHNICAL_SPECIFICATION.md)
-- [Project documentation](Documentation.md)
-- [Roadmap](PHASE2.md), [Phase 3](PHASE3.md), and [Phase 4](PHASE4.md)
+## Commands
 
-## Contributing
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Development server |
+| `npm run build` / `npm start` | Production build and server |
+| `npm test` | Unit tests |
+| `npm run typecheck` | TypeScript check |
+| `npm run db:setup` | Apply the canonical schema (idempotent) |
+| `npm run db:seed-admin` | Create/update the superadmin |
 
-Please open an issue for significant proposals, keep pull requests focused, and include tests or documentation for user-facing changes.
+## Configuration notes
 
-## License
+- `JWT_SECRET` and `ENCRYPTION_MASTER_KEY` are **required** and must be 64 hex characters each (`openssl rand -hex 32`). The app fails fast rather than using insecure defaults.
+- Losing `ENCRYPTION_MASTER_KEY` makes stored audio unrecoverable. Back it up securely.
+- `STORAGE_DIR` defaults to `./uploads`; mount persistent storage there in production.
 
-MIT License. See [LICENSE](LICENSE) if present.
+## Documentation status
+
+`TECHNICAL_SPECIFICATION.md`, `PHASE2.md`, `PHASE3.md`, and `PHASE4.md` are historical planning documents. They describe aspirational features (private swarms, token economy, edge autoscaling) that are **not** part of the running application. [ARCHITECTURE.md](./ARCHITECTURE.md) is the authoritative description of the implemented system.

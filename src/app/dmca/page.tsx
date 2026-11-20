@@ -106,20 +106,15 @@ I swear, under penalty of perjury, that the information in this notification is 
               notified of infringing activity more than once or has had content removed more than once.
             </p>
 
-            <h2 className="text-2xl font-semibold mt-8 mb-4">5. Platform Limitations</h2>
+            <h2 className="text-2xl font-semibold mt-8 mb-4">5. Platform Capabilities</h2>
             <p className="text-muted-foreground mb-4">
-              As a decentralized peer-to-peer platform, P2P Music Platform has some unique 
-              characteristics that affect copyright enforcement:
+              P2P Music Platform is server-authoritative, which affects how copyright reports are handled:
             </p>
             <ul className="list-disc list-inside text-muted-foreground mb-4 space-y-2">
-              <li><strong>Encrypted Content:</strong> All music is encrypted with AES-256-GCM. 
-                  We cannot access or view the actual content, only metadata.</li>
-              <li><strong>Distributed Storage:</strong> Content is stored across multiple peers. 
-                  Removal from our platform does not guarantee removal from all peers.</li>
-              <li><strong>Magnet Links:</strong> Links contain encrypted references, not content. 
-                  We can block specific CIDs but cannot decrypt content.</li>
-              <li><strong>Follower-Only Access:</strong> Content is only accessible to approved 
-                  followers, limiting potential infringement scope.</li>
+              <li><strong>Encrypted Storage:</strong> Server-stored audio is encrypted with AES-256-GCM at rest.</li>
+              <li><strong>Server Control:</strong> We can remove reported audio from our storage and revoke its playback URLs.</li>
+              <li><strong>Optional IPFS:</strong> Tracks without a server copy may be retrieved from an external IPFS gateway; removal from that gateway is outside our direct control.</li>
+              <li><strong>Access Control:</strong> Playback URLs are short-lived and track-scoped, but authorized users can stream available content.</li>
             </ul>
 
             <h2 className="text-2xl font-semibold mt-8 mb-4">6. Contact Information</h2>

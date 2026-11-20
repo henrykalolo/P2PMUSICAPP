@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { verifyToken } from '@/lib/auth/jwt';
+import { createTrackStreamUrl } from '@/lib/media/signed-url';
 import {
   checkUserQuota,
   getStorageStats,
   storeOnServer,
   storeOnP2P,
+  readEncryptionMeta,
+  resolveServerFilePath,
   checkAndBalanceStorage,
+  FILE_TYPES,
   type ServerStorageResult,
   type P2PStorageResult,
 } from '@/lib/storage/unifiedStorage';
@@ -39,7 +43,6 @@ export async function GET(request: NextRequest) {
         p.genre,
         p.year,
         p.duration_seconds as duration,
-        p.magnet_uri,
         p.ipfs_cid,
         p.ipfs_metadata_cid,
         p.ipfs_gateway_url,
@@ -48,6 +51,8 @@ export async function GET(request: NextRequest) {
         p.cover_art_url,
         p.file_size,
         p.mime_type,
+        p.is_encrypted,
+        p.encryption_iv,
         p.created_at,
         u.id as author_id,
         u.username as author_username,
@@ -91,7 +96,6 @@ export async function GET(request: NextRequest) {
         genre: row.genre,
         year: row.year,
         duration: row.duration,
-        magnetUri: row.magnet_uri,
         ipfsCid: row.ipfs_cid,
         ipfsMetadataCid: row.ipfs_metadata_cid,
         ipfsGatewayUrl: row.ipfs_gateway_url,
@@ -100,8 +104,10 @@ export async function GET(request: NextRequest) {
         coverArtUrl: row.cover_art_url,
         fileSize: row.file_size,
         mimeType: row.mime_type,
+        streamUrl: createTrackStreamUrl(row.id, row.storage_type, row.server_storage_id, row.ipfs_cid),
+        isEncrypted: row.is_encrypted,
         createdAt: row.created_at,
-        instantReady: row.storage_type === 'server', // Server storage = instant rendering
+        instantReady: row.storage_type === 'server',
         author: {
           id: row.author_id,
           username: row.author_username,
@@ -206,6 +212,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if ((!file || metadataOnly) && !serverStorageId && !ipfsCid) {
+      return NextResponse.json(
+        { error: 'A file, serverStorageId, or ipfsCid is required' },
+        { status: 400 }
+      );
+    }
+
     let storageType: 'server' | 'ipfs' | 'hybrid' = 'server';
     let serverStorageIdResult: string | null = null;
     let ipfsCidResult: string | null = null;
@@ -213,9 +226,25 @@ export async function POST(request: NextRequest) {
     let fileSize = 0;
     let mimeType = 'audio/mpeg';
     let instantReady = true;
+    let encryptionIv: string | null = null;
+    let isEncrypted = false;
 
     // If file is provided directly, upload using unified storage
     if (file && !metadataOnly) {
+      const audioConfig = FILE_TYPES.audio;
+      if (!audioConfig.allowedTypes.includes(file.type)) {
+        return NextResponse.json(
+          { error: 'Invalid audio file type' },
+          { status: 400 }
+        );
+      }
+      if (file.size > audioConfig.maxSize) {
+        return NextResponse.json(
+          { error: 'File too large. Maximum size is 100MB' },
+          { status: 400 }
+        );
+      }
+
       // Check server storage and balance if needed before upload
       if (file.size > 10 * 1024 * 1024) { // Only balance for files > 10MB
         await checkAndBalanceStorage();
@@ -241,6 +270,8 @@ export async function POST(request: NextRequest) {
         storageType = 'server';
         serverStorageIdResult = serverResult.fileId;
         instantReady = serverResult.instantReady;
+        encryptionIv = serverResult.encryptionIv || null;
+        isEncrypted = Boolean(serverResult.isEncrypted);
       } else if (quotaCheck.excessForP2P) {
         // Upload to P2P storage (fallback for excess data)
         const p2pResult = await storeOnP2P(file, { title, artist, album, genre, year, duration, uploadedBy: payload.userId }) as P2PStorageResult;
@@ -257,8 +288,16 @@ export async function POST(request: NextRequest) {
     } else if (serverStorageId) {
       // Using server storage with pre-uploaded file
       storageType = 'server';
+      try {
+        resolveServerFilePath(payload.userId, serverStorageId, 'audio');
+      } catch {
+        return NextResponse.json({ error: 'Uploaded file not found' }, { status: 404 });
+      }
       serverStorageIdResult = serverStorageId;
       instantReady = true;
+      const meta = await readEncryptionMeta(payload.userId, serverStorageId, 'audio');
+      encryptionIv = meta?.iv || null;
+      isEncrypted = Boolean(meta);
     } else if (ipfsCid) {
       // Using IPFS storage
       storageType = 'ipfs';
@@ -299,8 +338,10 @@ export async function POST(request: NextRequest) {
         server_storage_id,
         file_size,
         mime_type,
-        cover_art_url
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        cover_art_url,
+        is_encrypted,
+        encryption_iv
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
       RETURNING *`,
       [
         payload.userId,
@@ -318,6 +359,8 @@ export async function POST(request: NextRequest) {
         fileSize,
         mimeType,
         coverArtUrl || null,
+        isEncrypted,
+        encryptionIv ? Buffer.from(encryptionIv, 'hex') : null,
       ]
     );
 
@@ -345,6 +388,8 @@ export async function POST(request: NextRequest) {
         ipfsGatewayUrl: track.ipfs_gateway_url,
         fileSize: track.file_size,
         mimeType: track.mime_type,
+        streamUrl: createTrackStreamUrl(track.id, track.storage_type, track.server_storage_id, track.ipfs_cid),
+        isEncrypted: track.is_encrypted,
         coverArtUrl: track.cover_art_url,
         instantReady, // Track is instantly ready for server storage
         createdAt: track.created_at,

@@ -5,7 +5,7 @@ import { ServiceWorkerProvider } from "@/components/providers/ServiceWorkerProvi
 
 export const metadata: Metadata = {
   title: "P2P Music Platform",
-  description: "A decentralized, peer-to-peer music streaming and social platform",
+  description: "A server-authoritative music streaming and social platform with optional IPFS support",
   manifest: "/manifest.json",
   icons: {
     icon: "/favicon.ico",

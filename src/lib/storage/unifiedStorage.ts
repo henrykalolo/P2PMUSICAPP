@@ -13,7 +13,11 @@ import { existsSync } from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { query } from '@/lib/db';
-import { uploadFile, uploadTrackMetadata, getIPFSGatewayUrl } from '@/lib/ipfs';
+import {
+  encryptForStorage,
+  decryptRange,
+  plaintextSizeFromCiphertext,
+} from './file-crypto';
 
 // Configuration
 export const STORAGE_DIR = process.env.STORAGE_DIR || './uploads';
@@ -398,6 +402,35 @@ export interface ServerStorageResult {
   size: number;
   mimeType: string;
   instantReady: boolean;
+  /** Hex-encoded AES-GCM base IV when the file was encrypted at rest. */
+  encryptionIv?: string;
+  isEncrypted?: boolean;
+}
+
+export interface FileEncryptionMeta {
+  iv: string;
+  size: number;
+  alg: 'aes-256-gcm';
+}
+
+/** Sidecar next to each stored file describing its encryption. */
+function getEncryptionMetaPath(filePath: string): string {
+  return `${filePath}.enc.json`;
+}
+
+export async function readEncryptionMeta(
+  userId: string,
+  fileId: string,
+  fileType: string
+): Promise<FileEncryptionMeta | null> {
+  // Validate identifiers before they are used as path components.
+  if (!/^[0-9a-f-]{36}$/i.test(userId) || !/^[0-9a-f-]{36}$/i.test(fileId)) return null;
+  const filePath = resolveServerFilePath(userId, fileId, fileType);
+  try {
+    return JSON.parse(await readFile(getEncryptionMetaPath(filePath), 'utf8')) as FileEncryptionMeta;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -469,25 +502,49 @@ export async function storeOnServer(
 
   // Generate unique file ID and filename
   const fileId = generateFileId();
-  const ext = path.extname(file.name) || typeConfig.extensions[0];
+  const uploadedExt = path.extname(file.name).toLowerCase();
+  const ext = typeConfig.extensions.includes(uploadedExt) ? uploadedExt : typeConfig.extensions[0];
   const filename = `${fileId}${ext}`;
   const filePath = path.join(subdirPath, filename);
 
-  // Convert File to Buffer and save
+  // Encrypt at rest with chunked AES-256-GCM so byte-range playback works.
   const arrayBuffer = await file.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-  await writeFile(filePath, buffer);
+  const plaintext = Buffer.from(arrayBuffer);
+  const encrypted = encryptForStorage(plaintext);
+  await writeFile(filePath, encrypted.data);
+  await writeFile(
+    getEncryptionMetaPath(filePath),
+    JSON.stringify({ iv: encrypted.iv.toString('hex'), size: plaintext.length, alg: 'aes-256-gcm' })
+  );
 
   return {
     success: true,
     fileId,
     storageType: 'server',
     path: filePath,
-    url: `/api/storage/download?id=${fileId}&fileType=${fileType}`,
-    size: file.size,
+    url: `/api/storage?id=${fileId}&fileType=${fileType}`,
+    size: plaintext.length,
     mimeType: file.type,
-    instantReady: true, // Always instant for server storage
+    instantReady: true,
+    encryptionIv: encrypted.iv.toString('hex'),
+    isEncrypted: true,
   };
+}
+
+/** Resolve the on-disk path for a stored file without allowing path traversal. */
+export function resolveServerFilePath(userId: string, fileId: string, fileType: string): string {
+  if (!/^[0-9a-f-]{36}$/i.test(userId) || !/^[0-9a-f-]{36}$/i.test(fileId)) {
+    throw new Error('Invalid storage identifier');
+  }
+  const subdir = fileType === 'avatar' ? 'avatars' : fileType === 'coverArt' ? 'coverart' : 'tracks';
+  const subdirPath = getUserSubdirPath(userId, subdir);
+  const typeConfig = FILE_TYPES[fileType as keyof typeof FILE_TYPES];
+  const extensions = typeConfig?.extensions || ['.mp3', '.ogg', '.wav', '.flac', '.m4a'];
+  for (const ext of extensions) {
+    const candidate = path.join(subdirPath, `${fileId}${ext}`);
+    if (existsSync(candidate)) return candidate;
+  }
+  throw new Error('File not found');
 }
 
 /**
@@ -517,8 +574,20 @@ export async function retrieveFromServer(
     throw new Error('File not found');
   }
 
-  const buffer = await readFile(filePath);
-  const stats = await stat(filePath);
+  const stored = await readFile(filePath);
+  const meta = await readEncryptionMeta(userId, fileId, fileType);
+  let buffer = stored;
+  let size = (await stat(filePath)).size;
+
+  if (meta) {
+    const iv = Buffer.from(meta.iv, 'hex');
+    const plaintextSize = meta.size > 0 ? meta.size : plaintextSizeFromCiphertext(stored.length);
+    buffer = Buffer.from(
+      decryptRange(stored, iv, plaintextSize, 0, Math.max(0, plaintextSize - 1))
+    );
+    size = plaintextSize;
+  }
+
   const ext = path.extname(filePath).toLowerCase();
   
   const mimeTypes: Record<string, string> = {
@@ -537,7 +606,7 @@ export async function retrieveFromServer(
   return {
     buffer,
     mimeType: mimeTypes[ext] || 'application/octet-stream',
-    size: stats.size,
+    size,
   };
 }
 
@@ -559,6 +628,9 @@ export async function deleteFromServer(
     const filePath = path.join(subdirPath, `${fileId}${ext}`);
     if (existsSync(filePath)) {
       await unlink(filePath);
+      if (existsSync(getEncryptionMetaPath(filePath))) {
+        await unlink(getEncryptionMetaPath(filePath)).catch(() => undefined);
+      }
       return true;
     }
   }
@@ -597,6 +669,8 @@ export async function storeOnP2P(
     uploadedBy?: string;
   }
 ): Promise<P2PStorageResult> {
+  // IPFS is optional: load it only when this fallback path is actually used.
+  const { uploadFile, uploadTrackMetadata, getIPFSGatewayUrl } = await import('@/lib/ipfs');
   const arrayBuffer = await file.arrayBuffer();
   const uint8Array = new Uint8Array(arrayBuffer);
 
@@ -924,7 +998,7 @@ export async function getOldestServerFiles(
     params.push(excludeUserId);
   }
   
-  sql += ` ORDER BY p.created_at ASC LIMIT ${params.length + 1}`;
+  sql += ` ORDER BY p.created_at ASC LIMIT $${params.length + 1}`;
   params.push(limit);
   
   const result = await query(sql, params);
@@ -951,6 +1025,9 @@ export async function migrateFileToP2P(
   error?: string;
 }> {
   try {
+    // IPFS is optional and loaded only for this migration path.
+    const { uploadFile, getIPFSGatewayUrl } = await import('@/lib/ipfs');
+
     // Get the post details
     const postResult = await query(
       `SELECT p.*, u.username as author_username 
@@ -966,60 +1043,42 @@ export async function migrateFileToP2P(
     
     const post = postResult.rows[0];
     
-    // Read file from server
-    const filePath = path.join(
-      STORAGE_DIR, 
-      'users', 
-      post.author_id, 
-      'tracks',
-      `${post.server_storage_id}.mp3`
-    );
-    
-    if (!existsSync(filePath)) {
-      // Try other extensions
-      const extensions = ['.mp3', '.ogg', '.wav', '.flac', '.m4a'];
-      let foundPath = null;
-      for (const ext of extensions) {
-        const tryPath = path.join(STORAGE_DIR, 'users', post.author_id, 'tracks', `${post.server_storage_id}${ext}`);
-        if (existsSync(tryPath)) {
-          foundPath = tryPath;
-          break;
-        }
-      }
-      
-      if (!foundPath) {
-        return { success: false, postId, error: 'File not found on server' };
-      }
+    // Retrieve the decrypted plaintext through the normal storage reader.
+    let plaintext: Buffer;
+    try {
+      plaintext = (await retrieveFromServer(post.author_id, post.server_storage_id, 'audio')).buffer;
+    } catch {
+      return { success: false, postId, error: 'File not found on server' };
     }
+
+    // Upload plaintext to IPFS (the server copy is encrypted at rest).
+    const uploadResult = await uploadFile(new Uint8Array(plaintext));
     
-    const buffer = await readFile(filePath);
-    const uint8Array = new Uint8Array(buffer);
-    
-    // Upload to IPFS
-    const uploadResult = await uploadFile(uint8Array);
-    
-    // Update post record
+    // Update the post atomically: once the server copy is removed, no stale
+    // storage id may remain or the media route would try to read a deleted file.
     await query(
-      `UPDATE posts SET 
-        storage_type = 'hybrid',
+      `UPDATE posts SET
+        storage_type = 'ipfs',
         ipfs_cid = $1,
         ipfs_gateway_url = $2,
-        instant_ready = FALSE,
+        server_storage_id = NULL,
+        is_encrypted = FALSE,
+        encryption_iv = NULL,
         updated_at = NOW()
        WHERE id = $3`,
       [uploadResult.cid, getIPFSGatewayUrl(uploadResult.cid), postId]
     );
-    
-    // Delete from server
-    await unlink(filePath);
-    
+
+    // Remove the server copy only after the IPFS upload and metadata update succeeded.
+    await deleteFromServer(post.author_id, post.server_storage_id, 'audio');
+
     // Notify user
     await createStorageNotification(
       post.author_id,
       'storage_fallback',
-      'File Migrated to P2P Network',
-      `Your track "${post.title}" has been automatically moved to the decentralized P2P storage due to server capacity limits. It will still be accessible for playback.`,
-      { fileSize: post.file_size, storageType: 'hybrid' }
+      'File Migrated to IPFS',
+      `Your track "${post.title}" was moved to IPFS to free server capacity. It remains available for playback.`,
+      { fileSize: post.file_size, storageType: 'ipfs' }
     );
     
     return { success: true, postId, cid: uploadResult.cid };
@@ -1372,6 +1431,8 @@ export default {
   // Server storage
   storeOnServer,
   retrieveFromServer,
+  resolveServerFilePath,
+  readEncryptionMeta,
   deleteFromServer,
 
   // P2P storage

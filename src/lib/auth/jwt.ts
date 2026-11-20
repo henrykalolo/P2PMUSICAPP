@@ -1,8 +1,27 @@
 import { SignJWT, jwtVerify } from 'jose';
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'your-secret-key-at-least-32-characters-long'
-);
+/**
+ * JWT signing key.
+ *
+ * There is intentionally no fallback: a deployment with a missing or weak
+ * JWT_SECRET must fail to boot rather than silently signing insecure tokens.
+ */
+function loadSecret(): Uint8Array {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error('JWT_SECRET is not configured. Generate one with: openssl rand -hex 32');
+  }
+  if (secret.length < 32) {
+    throw new Error('JWT_SECRET must be at least 32 characters long.');
+  }
+  return new TextEncoder().encode(secret);
+}
+
+let cachedSecret: Uint8Array | null = null;
+function getSecret(): Uint8Array {
+  if (!cachedSecret) cachedSecret = loadSecret();
+  return cachedSecret;
+}
 
 export interface JWTPayload {
   userId: string;
@@ -11,11 +30,8 @@ export interface JWTPayload {
   onboardingCompleted: boolean;
 }
 
-/**
- * Create a JWT token
- */
 export async function createToken(payload: JWTPayload): Promise<string> {
-  const token = await new SignJWT({
+  return new SignJWT({
     userId: payload.userId,
     username: payload.username,
     role: payload.role,
@@ -24,22 +40,25 @@ export async function createToken(payload: JWTPayload): Promise<string> {
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('7d')
-    .sign(JWT_SECRET);
-
-  return token;
+    .sign(getSecret());
 }
 
-/**
- * Verify a JWT token
- */
 export async function verifyToken(token: string): Promise<JWTPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, JWT_SECRET);
+    const { payload } = await jwtVerify(token, getSecret(), { algorithms: ['HS256'] });
+    if (
+      typeof payload.userId !== 'string' ||
+      typeof payload.username !== 'string' ||
+      typeof payload.role !== 'string' ||
+      typeof payload.onboardingCompleted !== 'boolean'
+    ) {
+      return null;
+    }
     return {
-      userId: payload.userId as string,
-      username: payload.username as string,
-      role: payload.role as string,
-      onboardingCompleted: payload.onboardingCompleted as boolean,
+      userId: payload.userId,
+      username: payload.username,
+      role: payload.role,
+      onboardingCompleted: payload.onboardingCompleted,
     };
   } catch {
     return null;

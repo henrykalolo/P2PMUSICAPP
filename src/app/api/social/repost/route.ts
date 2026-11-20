@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { verifyToken } from '@/lib/auth/jwt';
+import { createTrackStreamUrl } from '@/lib/media/signed-url';
 
 // POST /api/social/repost - Repost a post
 export async function POST(request: NextRequest) {
@@ -82,7 +83,9 @@ export async function POST(request: NextRequest) {
     // Get original post author
     const originalPostResult = await query(`
       SELECT p.id, p.title, p.artist, p.album, p.genre, p.duration_seconds,
-             p.magnet_uri, p.ipfs_cid, p.cover_art_url, p.created_at,
+             p.storage_type, p.server_storage_id, p.ipfs_cid, p.cover_art_url, p.created_at,
+             (SELECT COUNT(*) FROM likes WHERE post_id = p.id) as likes_count,
+             (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comments_count,
              u.id as author_id, u.username as author_username, u.avatar_url as author_avatar
       FROM posts p
       JOIN users u ON p.author_id = u.id
@@ -109,10 +112,20 @@ export async function POST(request: NextRequest) {
           album: originalPostResult.rows[0].album,
           genre: originalPostResult.rows[0].genre,
           duration: originalPostResult.rows[0].duration_seconds,
-          magnetUri: originalPostResult.rows[0].magnet_uri,
           ipfsCid: originalPostResult.rows[0].ipfs_cid,
+          storageType: originalPostResult.rows[0].storage_type,
+          serverStorageId: originalPostResult.rows[0].server_storage_id,
+          streamUrl: createTrackStreamUrl(
+            originalPostResult.rows[0].id,
+            originalPostResult.rows[0].storage_type,
+            originalPostResult.rows[0].server_storage_id,
+            originalPostResult.rows[0].ipfs_cid
+          ),
           coverArtUrl: originalPostResult.rows[0].cover_art_url,
           createdAt: originalPostResult.rows[0].created_at,
+          likesCount: Number(originalPostResult.rows[0].likes_count),
+          commentsCount: Number(originalPostResult.rows[0].comments_count),
+          repostsCount: parseInt(repostCountResult.rows[0].count),
           author: {
             id: originalPostResult.rows[0].author_id,
             username: originalPostResult.rows[0].author_username,

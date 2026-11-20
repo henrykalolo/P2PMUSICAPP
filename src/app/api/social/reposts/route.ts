@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { verifyToken } from '@/lib/auth/jwt';
+import { createTrackStreamUrl } from '@/lib/media/signed-url';
 
 // GET /api/social/reposts - Get reposts (with optional user and following filters)
 export async function GET(request: NextRequest) {
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
       SELECT r.id, r.user_id, r.post_id, r.caption, r.created_at,
              u.id as reposter_id, u.username as reposter_username, u.avatar_url as reposter_avatar, u.badge as reposter_badge,
              p.id as original_post_id, p.title, p.artist, p.album, p.genre, p.duration_seconds,
-             p.magnet_uri, p.ipfs_cid, p.cover_art_url, p.created_at as original_created_at,
+             p.storage_type, p.server_storage_id, p.ipfs_cid, p.cover_art_url, p.created_at as original_created_at,
              au.id as author_id, au.username as author_username, au.avatar_url as author_avatar, au.badge as author_badge
       FROM reposts r
       JOIN users u ON r.user_id = u.id
@@ -84,8 +85,15 @@ export async function GET(request: NextRequest) {
             album: row.album,
             genre: row.genre,
             duration: row.duration_seconds,
-            magnetUri: row.magnet_uri,
             ipfsCid: row.ipfs_cid,
+            storageType: row.storage_type,
+            serverStorageId: row.server_storage_id,
+            streamUrl: createTrackStreamUrl(
+              row.original_post_id,
+              row.storage_type,
+              row.server_storage_id,
+              row.ipfs_cid
+            ),
             coverArtUrl: row.cover_art_url,
             createdAt: row.original_created_at,
             likesCount: parseInt(likesCountResult.rows[0].count),

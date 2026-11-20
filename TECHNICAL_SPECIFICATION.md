@@ -1,3 +1,5 @@
+> **Historical planning document.** This describes an aspirational P2P-first design, not the implemented system. See [ARCHITECTURE.md](./ARCHITECTURE.md) for current behavior.
+
 # Decentralized P2P Music Social Platform
 
 ## Technical Specification: Spotify for the Decentralized Web

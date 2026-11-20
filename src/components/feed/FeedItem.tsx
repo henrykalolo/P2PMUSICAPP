@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { P2PMusicPlayer } from '@/components/player/P2PMusicPlayer';
+import { UnifiedMusicPlayer } from '@/components/player/UnifiedMusicPlayer';
 import { Button } from '@/components/ui/button';
 import { Heart, MessageCircle, Share2, User } from 'lucide-react';
 
@@ -13,8 +13,8 @@ interface FeedItemProps {
     album: string;
     genre: string;
     duration: number;
-    magnetUri?: string;
     ipfsCid?: string;
+    streamUrl?: string | null;
     coverArtUrl?: string;
     createdAt: string;
     author: {
@@ -30,7 +30,6 @@ interface FeedItemProps {
 export const FeedItem: React.FC<FeedItemProps> = ({ post }) => {
   const [hasLiked, setHasLiked] = useState(false);
   const [showComments, setShowComments] = useState(false);
-  const [isSeeding, setIsSeeding] = useState(false);
 
   const handleLike = async () => {
     try {
@@ -51,11 +50,13 @@ export const FeedItem: React.FC<FeedItemProps> = ({ post }) => {
     }
   };
 
-  const handleShare = () => {
-    const shareText = post.magnetUri || (post.ipfsCid ? `https://ipfs.io/ipfs/${post.ipfsCid}` : '');
-    if (shareText) {
-      navigator.clipboard.writeText(shareText);
+  const handleShare = async () => {
+    const shareText = `${window.location.origin}/post/${post.id}`;
+    try {
+      await navigator.clipboard.writeText(shareText);
       alert('Link copied to clipboard!');
+    } catch {
+      alert('Unable to copy link');
     }
   };
 
@@ -113,9 +114,15 @@ export const FeedItem: React.FC<FeedItemProps> = ({ post }) => {
         </div>
       )}
 
-      {/* P2P Player */}
+      {/* Player */}
       <div className="mb-4">
-        <P2PMusicPlayer magnetURI={post.magnetUri} />
+        <UnifiedMusicPlayer
+          trackId={post.id}
+          src={post.streamUrl}
+          title={post.title}
+          artist={post.artist}
+          poster={post.coverArtUrl}
+        />
       </div>
 
       {/* Social Actions */}
@@ -143,12 +150,6 @@ export const FeedItem: React.FC<FeedItemProps> = ({ post }) => {
           <Share2 className="h-4 w-4 mr-2" />
           Share
         </Button>
-
-        {isSeeding && (
-          <span className="text-xs text-green-500 ml-auto flex items-center gap-1">
-            ⚡ Seeding
-          </span>
-        )}
       </div>
 
       {/* Comments Section */}

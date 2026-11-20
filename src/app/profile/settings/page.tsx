@@ -131,7 +131,7 @@ export default function ProfileSettingsPage() {
       formData.append('file', file);
       formData.append('fileType', 'avatar');
 
-      const response = await fetch('/api/storage/upload', {
+      const response = await fetch('/api/storage', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,
@@ -146,7 +146,14 @@ export default function ProfileSettingsPage() {
 
       const data = await response.json();
 
-      // Update profile with new avatar URL
+      // Avatars are public profile data; use the public read-only route so <img>
+      // can load them without a Bearer header.
+      const ownerId = profile?.id || user?.id;
+      if (!ownerId || !data.id) {
+        throw new Error('Avatar upload response was incomplete');
+      }
+      const avatarUrl = `/api/storage/public?userId=${encodeURIComponent(ownerId)}&id=${encodeURIComponent(data.id)}`;
+
       const updateResponse = await fetch('/api/auth/update-profile', {
         method: 'PUT',
         headers: {
@@ -155,7 +162,7 @@ export default function ProfileSettingsPage() {
         },
         body: JSON.stringify({
           ...formData,
-          avatarUrl: `/api/storage/download?id=${data.id}&fileType=avatar`,
+          avatarUrl,
         }),
       });
 

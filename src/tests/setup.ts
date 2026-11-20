@@ -31,7 +31,7 @@ Object.defineProperty(window, 'matchMedia', {
 // Mock window.CSS
 window.CSS = {
   supports: vi.fn().mockReturnValue(true),
-} as unknown as CSS;
+} as unknown as typeof CSS;
 
 // Cleanup after each test
 afterEach(() => {

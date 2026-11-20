@@ -1,65 +1,55 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { initIPFS, isIPFSSupported, getHelia } from '@/lib/ipfs/client';
 
-// GET /api/ipfs/status - Check IPFS node status
-export async function GET(request: NextRequest) {
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+/**
+ * GET /api/ipfs/status - report whether the browser IPFS client can be used.
+ * Helia/libp2p is loaded lazily so this endpoint can never break the build or
+ * core server-side upload/playback paths.
+ */
+export async function GET(_request: NextRequest) {
+  if (typeof window === 'undefined') {
+    return NextResponse.json({
+      supported: false,
+      initialized: false,
+      reason: 'IPFS runs in the browser; server-side IPFS is optional and not enabled by default.',
+    });
+  }
+
   try {
-    // Check if IPFS is supported
+    const { isIPFSSupported, getHelia } = await import('@/lib/ipfs/client');
     if (!isIPFSSupported()) {
-      return NextResponse.json({
-        supported: false,
-        initialized: false,
-        error: 'IPFS is not supported in this environment',
-      });
+      return NextResponse.json({ supported: false, initialized: false });
     }
 
-     // Try to get existing instance or initialize
     let helia;
     try {
       helia = await getHelia();
     } catch {
-      // Not initialized yet, that's ok
-      return NextResponse.json({
-        supported: true,
-        initialized: false,
-        peerId: null,
-        connections: 0,
-      });
+      return NextResponse.json({ supported: true, initialized: false, peerId: null, connections: 0 });
     }
 
-    // Get peer info
-    const peerId = helia.libp2p.peerId.toString();
-    
-    // Get connection count
-    const connections = helia.libp2p.getConnections().length;
-
-    // Get pinned content count
     let pinnedCount = 0;
     try {
-      for await (const _ of helia.pins.ls()) {
-        pinnedCount++;
-      }
+      for await (const _ of helia.pins.ls()) pinnedCount++;
     } catch {
-      // Ignore errors when counting pins
+      // Pin listing is best-effort.
     }
 
     return NextResponse.json({
       supported: true,
       initialized: true,
-      peerId,
-      connections,
+      peerId: helia.libp2p.peerId.toString(),
+      connections: helia.libp2p.getConnections().length,
       pinnedCount,
       protocols: Array.from(helia.libp2p.getProtocols()),
     });
   } catch (error) {
-    console.error('IPFS status error:', error);
-    return NextResponse.json(
-      {
-        supported: false,
-        initialized: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
-      },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      supported: false,
+      initialized: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
   }
 }

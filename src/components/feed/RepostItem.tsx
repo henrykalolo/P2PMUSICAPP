@@ -25,8 +25,9 @@ interface RepostItemProps {
       album: string;
       genre: string;
       duration: number;
-      magnetUri?: string;
       ipfsCid?: string;
+      streamUrl?: string | null;
+      storageType?: string;
       coverArtUrl?: string;
       createdAt: string;
       likesCount: number;
